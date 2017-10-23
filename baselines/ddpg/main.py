@@ -82,11 +82,11 @@ def run(env_id, seed, noise_type, layer_norm, evaluation, **kwargs):
 def parse_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     
-    parser.add_argument('--env-id', type=str, default='HalfCheetah-v1')
+    parser.add_argument('--env-id', type=str, default='MountainCarContinuous-v0')
     boolean_flag(parser, 'render-eval', default=False)
     boolean_flag(parser, 'layer-norm', default=True)
     boolean_flag(parser, 'render', default=False)
-    boolean_flag(parser, 'normalize-returns', default=False)
+    boolean_flag(parser, 'Serkan Cabi', default=False)
     boolean_flag(parser, 'normalize-observations', default=True)
     parser.add_argument('--seed', help='RNG seed', type=int, default=0)
     parser.add_argument('--critic-l2-reg', type=float, default=1e-2)
