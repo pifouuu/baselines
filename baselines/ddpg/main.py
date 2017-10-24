@@ -9,7 +9,7 @@ from baselines.common.misc_util import (
 )
 import baselines.ddpg.training as training
 from baselines.ddpg.models import Actor, Critic
-from baselines.ddpg.memory import Memory
+from baselines.ddpg.memory import Memory, HERBuffer
 from baselines.ddpg.noise import *
 
 import gym
@@ -23,7 +23,7 @@ def run(env_id, seed, noise_type, layer_norm, evaluation, **kwargs):
 
     # Create envs.
     env = gym.make(env_id)
-    env = bench.Monitor(env, logger.get_dir() and os.path.join(logger.get_dir(), "%i.monitor.json"%rank))
+    env = bench.Monitor(env, logger.get_dir() and os.path.join(logger.get_dir(), "%i.monitor.json"%rank), allow_early_resets=True)
     gym.logger.setLevel(logging.WARN)
 
     if evaluation and rank==0:
@@ -53,8 +53,10 @@ def run(env_id, seed, noise_type, layer_norm, evaluation, **kwargs):
         else:
             raise RuntimeError('unknown noise type "{}"'.format(current_noise_type))
 
+
     # Configure components.
-    memory = Memory(limit=int(1e6), action_shape=env.action_space.shape, observation_shape=env.observation_space.shape)
+    memory = HERBuffer(limit=int(1e6), action_shape=env.action_space.shape,
+                       observation_space=env.observation_space, strategy='last')
     critic = Critic(layer_norm=layer_norm)
     actor = Actor(nb_actions, layer_norm=layer_norm)
 
@@ -86,7 +88,7 @@ def parse_args():
     boolean_flag(parser, 'render-eval', default=False)
     boolean_flag(parser, 'layer-norm', default=True)
     boolean_flag(parser, 'render', default=False)
-    boolean_flag(parser, 'Serkan Cabi', default=False)
+    boolean_flag(parser, 'normalize-returns', default=False)
     boolean_flag(parser, 'normalize-observations', default=True)
     parser.add_argument('--seed', help='RNG seed', type=int, default=0)
     parser.add_argument('--critic-l2-reg', type=float, default=1e-2)
@@ -98,10 +100,11 @@ def parse_args():
     parser.add_argument('--reward-scale', type=float, default=1.)
     parser.add_argument('--clip-norm', type=float, default=None)
     parser.add_argument('--nb-epochs', type=int, default=500)  # with default settings, perform 1M steps total
-    parser.add_argument('--nb-epoch-cycles', type=int, default=20)
+    parser.add_argument('--nb-cycles-per-epoch', type=int, default=20)
+    parser.add_argument('--nb-episodes-per-cycle', type=int, default=16)
     parser.add_argument('--nb-train-steps', type=int, default=50)  # per epoch cycle and MPI worker
     parser.add_argument('--nb-eval-steps', type=int, default=100)  # per epoch cycle and MPI worker
-    parser.add_argument('--nb-rollout-steps', type=int, default=100)  # per epoch cycle and MPI worker
+    parser.add_argument('--nb-steps-per-episode', type=int, default=100)  # per epoch cycle and MPI worker
     parser.add_argument('--noise-type', type=str, default='adaptive-param_0.2')  # choices are adaptive-param_xx, ou_xx, normal_xx, none
     boolean_flag(parser, 'evaluation', default=False)
     return vars(parser.parse_args())

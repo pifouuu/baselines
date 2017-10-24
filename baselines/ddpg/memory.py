@@ -48,6 +48,8 @@ class Memory(object):
         self.rewards = RingBuffer(limit, shape=(1,))
         self.terminals1 = RingBuffer(limit, shape=(1,))
         self.observations1 = RingBuffer(limit, shape=observation_shape)
+        self.observation_shape = observation_shape
+        self.action_shape = action_shape
 
     def sample(self, batch_size):
         # Draw such that we always have a proceeding element.
@@ -77,6 +79,89 @@ class Memory(object):
         self.rewards.append(reward)
         self.observations1.append(obs1)
         self.terminals1.append(terminal1)
+
+    def flush(self):
+        pass
+
+    def sample_goal(self):
+        pass
+
+    def compute_reward(self):
+        pass
+
+    def compute_done(self):
+        pass
+
+    @property
+    def nb_entries(self):
+        return len(self.observations0)
+
+class HERBuffer(Memory):
+    def __init__(self, limit, action_shape, observation_space, strategy):
+        """Replay buffer that does Hindsight Experience Replay
+        obs_to_goal is a function that converts observations to goals
+        goal_slice is a slice of indices of goal in observation
+        """
+        self.observation_shape = np.array(observation_space.shape)
+        self.observation_shape[0] *= 2
+        self.observation_shape = tuple(self.observation_shape)
+
+        Memory.__init__(self, limit, action_shape, self.observation_shape)
+        self.strategy = strategy
+        self.data = [] # stores current episode
+
+        self.goal_slice = range(self.observation_shape[0]//2, self.observation_shape[0])
+        self.state_slice = range(self.observation_shape[0]//2)
+        self.observation_space = observation_space
+        self.epsilon = 0.1
+
+    def compute_reward(self, obs_goal):
+        obs = obs_goal[self.state_slice]
+        goal = obs_goal[self.goal_slice]
+        r=0
+        if np.linalg.norm(obs-goal,1)<self.epsilon:
+            r += 1
+        return r
+
+    def compute_terminal(self, obs_goal):
+        obs = obs_goal[self.state_slice]
+        goal = obs_goal[self.goal_slice]
+        terminal = False
+        if np.linalg.norm(obs - goal, 1) < self.epsilon:
+            terminal = True
+        return terminal
+
+    def sample_goal(self):
+        return self.observation_space.sample()
+
+    def flush(self):
+        """Dump the current data into the replay buffer with (final) HER"""
+        if not self.data:
+            return
+
+        for obs0, action, reward, obs1, terminal in self.data:
+            #obs0, action, reward, obs1, terminal = obs0.copy(), action.copy(), reward.copy(), obs1.copy(), terminal.copy()
+            super().append(obs0, action, reward, obs1, terminal)
+        if self.strategy=='last':
+            final_obs = self.data[-1][-2]
+            new_goal = final_obs[self.state_slice,...]
+            for obs0, action, _, obs1, _ in self.data:
+                #obs0, action, obs1 = obs0.copy(), action.copy(), obs1.copy()
+                obs0[self.goal_slice] = new_goal
+                obs1[self.goal_slice] = new_goal
+                reward =self.compute_reward(obs1)
+                terminal = self.compute_terminal(obs1)
+                super().append(obs0, action, reward, obs1, terminal)
+        else:
+            print('error her strategy')
+            return
+        self.data = []
+
+    def append(self, obs0, action, reward, obs1, terminal, training=True):
+        if not training:
+            return
+
+        self.data.append((obs0, action, reward, obs1, terminal))
 
     @property
     def nb_entries(self):
