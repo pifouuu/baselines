@@ -1,5 +1,5 @@
 import numpy as np
-
+from gym.spaces import prng
 
 class RingBuffer(object):
     def __init__(self, maxlen, shape, dtype='float32'):
@@ -97,42 +97,69 @@ class Memory(object):
         return len(self.observations0)
 
 class HERBuffer(Memory):
-    def __init__(self, limit, action_shape, observation_space, strategy):
+    def __init__(self, limit, action_shape, observation_space, strategy, goal_space):
         """Replay buffer that does Hindsight Experience Replay
         obs_to_goal is a function that converts observations to goals
         goal_slice is a slice of indices of goal in observation
         """
+        self.goal_space = goal_space
         self.observation_shape = np.array(observation_space.shape)
-        self.observation_shape[0] *= 2
+        if self.goal_space == 'full':
+            self.observation_shape[0] += self.observation_shape[0]
+            self.obs_goal_to_goal = range(self.observation_shape[0] // 2, self.observation_shape[0])
+            self.obs_goal_to_state = range(self.observation_shape[0] // 2)
+            self.obs_to_goal = range(self.observation_shape[0] // 2)
+        elif self.goal_space == 'position':
+            self.observation_shape[0] += 1
+            self.obs_goal_to_goal = range(self.observation_shape[0]-1, self.observation_shape[0])
+            self.obs_goal_to_state = range(self.observation_shape[0]-1)
+            self.obs_to_goal = range(self.observation_shape[0]-2)
+
+        else:
+            print("goal space strategy not implemented")
+            return
+
         self.observation_shape = tuple(self.observation_shape)
 
         Memory.__init__(self, limit, action_shape, self.observation_shape)
         self.strategy = strategy
         self.data = [] # stores current episode
 
-        self.goal_slice = range(self.observation_shape[0]//2, self.observation_shape[0])
-        self.state_slice = range(self.observation_shape[0]//2)
         self.observation_space = observation_space
         self.epsilon = 0.1
 
+    # TODO : better management of raise errors
     def compute_reward(self, obs_goal):
-        obs = obs_goal[self.state_slice]
-        goal = obs_goal[self.goal_slice]
+        obs = obs_goal[self.obs_goal_to_state]
+        goal = obs_goal[self.obs_goal_to_goal]
         r=0
-        if np.linalg.norm(obs-goal,1)<self.epsilon:
+        if self.goal_space == 'full'and np.linalg.norm(obs-goal,1)<self.epsilon:
+            r += 1
+        elif self.goal_space == 'position' and np.linalg.norm(obs[self.obs_to_goal]-goal,1)<self.epsilon:
             r += 1
         return r
 
     def compute_terminal(self, obs_goal):
-        obs = obs_goal[self.state_slice]
-        goal = obs_goal[self.goal_slice]
+        obs = obs_goal[self.obs_goal_to_state]
+        goal = obs_goal[self.obs_goal_to_goal]
         terminal = False
-        if np.linalg.norm(obs - goal, 1) < self.epsilon:
+        if self.goal_space == 'full'and np.linalg.norm(obs-goal,1)<self.epsilon:
+            terminal = True
+        elif self.goal_space == 'position' and np.linalg.norm(obs[self.obs_to_goal]-goal,1)<self.epsilon:
             terminal = True
         return terminal
 
     def sample_goal(self):
-        return self.observation_space.sample()
+        if self.goal_space == 'full':
+            g = self.observation_space.sample()
+        elif self.goal_space == 'position':
+            low = self.observation_space.low[self.obs_to_goal]
+            high = self.observation_space.high[self.obs_to_goal]
+            g = prng.np_random.uniform(low, high, low.shape)
+        else:
+            print('error goal space')
+            return
+        return g
 
     def flush(self):
         """Dump the current data into the replay buffer with (final) HER"""
@@ -144,11 +171,11 @@ class HERBuffer(Memory):
             super().append(obs0, action, reward, obs1, terminal)
         if self.strategy=='last':
             final_obs = self.data[-1][-2]
-            new_goal = final_obs[self.state_slice,...]
+            new_goal = final_obs[self.obs_goal_to_state,...][self.obs_to_goal]
             for obs0, action, _, obs1, _ in self.data:
                 #obs0, action, obs1 = obs0.copy(), action.copy(), obs1.copy()
-                obs0[self.goal_slice] = new_goal
-                obs1[self.goal_slice] = new_goal
+                obs0[self.obs_goal_to_goal] = new_goal
+                obs1[self.obs_goal_to_goal] = new_goal
                 reward =self.compute_reward(obs1)
                 terminal = self.compute_terminal(obs1)
                 super().append(obs0, action, reward, obs1, terminal)
