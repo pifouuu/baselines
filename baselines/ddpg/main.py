@@ -58,7 +58,7 @@ def run(env_id, seed, noise_type, layer_norm, evaluation, **kwargs):
 
     # Configure components.
     memory = HERBuffer(limit=int(1e6), action_shape=env.action_space.shape,
-                       observation_space=env.observation_space, strategy='last', goal_space='position')
+                       observation_space=env.observation_space, strategy='last', goal_space='env')
     critic = Critic(layer_norm=layer_norm)
     actor = Actor(nb_actions, layer_norm=layer_norm)
 

@@ -109,7 +109,7 @@ class HERBuffer(Memory):
             self.obs_goal_to_goal = range(self.observation_shape[0] // 2, self.observation_shape[0])
             self.obs_goal_to_state = range(self.observation_shape[0] // 2)
             self.obs_to_goal = range(self.observation_shape[0] // 2)
-        elif self.goal_space == 'position':
+        elif self.goal_space == 'position' or self.goal_space == 'env':
             self.observation_shape[0] += 1
             self.obs_goal_to_goal = range(self.observation_shape[0]-1, self.observation_shape[0])
             self.obs_goal_to_state = range(self.observation_shape[0]-1)
@@ -137,6 +137,8 @@ class HERBuffer(Memory):
             r += 1
         elif self.goal_space == 'position' and np.linalg.norm(obs[self.obs_to_goal]-goal,1)<self.epsilon:
             r += 1
+        elif self.goal_space == 'env' and obs[self.obs_to_goal]>=goal:
+            r += 1
         return r
 
     def compute_terminal(self, obs_goal):
@@ -147,6 +149,8 @@ class HERBuffer(Memory):
             terminal = True
         elif self.goal_space == 'position' and np.linalg.norm(obs[self.obs_to_goal]-goal,1)<self.epsilon:
             terminal = True
+        elif self.goal_space == 'env' and obs[self.obs_to_goal][0] >= goal[0]:
+            terminal = True
         return terminal
 
     def sample_goal(self):
@@ -156,9 +160,8 @@ class HERBuffer(Memory):
             low = self.observation_space.low[self.obs_to_goal]
             high = self.observation_space.high[self.obs_to_goal]
             g = prng.np_random.uniform(low, high, low.shape)
-        else:
-            print('error goal space')
-            return
+        elif self.goal_space == 'env':
+            g = [0.45]
         return g
 
     def flush(self):
