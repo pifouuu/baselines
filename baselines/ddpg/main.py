@@ -23,13 +23,15 @@ def run(env_id, seed, noise_type, layer_norm, evaluation, **kwargs):
 
     # Create envs.
     env = gym.make(env_id)
-    env = bench.Monitor(env, logger.get_dir() and os.path.join(logger.get_dir(), "%i.monitor.json"%rank), allow_early_resets=True)
+    filename = logger.get_dir() and os.path.join(logger.get_dir(), "%i.monitor.json"%rank)
+    env = bench.Monitor(env, filename, allow_early_resets=True)
     gym.logger.setLevel(logging.WARN)
 
     if evaluation and rank==0:
         eval_env = gym.make(env_id)
-        eval_env = bench.Monitor(eval_env, os.path.join(logger.get_dir(), 'gym_eval'))
-        env = bench.Monitor(env, None)
+        filename = logger.get_dir() and os.path.join(logger.get_dir(),'gym_eval')
+        eval_env = bench.Monitor(eval_env, filename, allow_early_resets=True)
+        #env = bench.Monitor(env, None)
     else:
         eval_env = None
 
@@ -83,7 +85,7 @@ def run(env_id, seed, noise_type, layer_norm, evaluation, **kwargs):
 
 def parse_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    
+
     parser.add_argument('--env-id', type=str, default='MountainCarContinuous-v0')
     boolean_flag(parser, 'render-eval', default=False)
     boolean_flag(parser, 'layer-norm', default=True)

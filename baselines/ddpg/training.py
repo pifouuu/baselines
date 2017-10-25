@@ -127,8 +127,10 @@ def train(env, nb_epochs, nb_cycles_per_epoch, nb_episodes_per_cycle, render_eva
                 eval_qs = []
                 if eval_env is not None:
                     eval_episode_reward = 0.
+                    eval_goal = agent.memory.sample_goal()
                     for t_rollout in range(nb_eval_steps):
-                        eval_action, eval_q = agent.pi(eval_obs, apply_noise=False, compute_Q=True)
+                        eval_obs_goal = np.concatenate([eval_obs, eval_goal])
+                        eval_action, eval_q = agent.pi(eval_obs_goal, apply_noise=False, compute_Q=True)
                         eval_obs, eval_r, eval_done, eval_info = eval_env.step(max_action * eval_action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
                         if render_eval:
                             eval_env.render()
