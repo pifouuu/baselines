@@ -70,7 +70,7 @@ def train(env, nb_epochs, nb_cycles_per_epoch, nb_episodes_per_cycle, render_eva
                     goal_episode = agent.memory.env_wrapper.sample_goal()
                     for step in range(nb_steps_per_episode):
                         # Predict next action.
-                        state0 = np.concatenate([obs, goal_episode])
+                        state0 = agent.memory.env_wrapper.process_state(obs, goal_episode)
                         action, q = agent.pi(state0, apply_noise=True, compute_Q=True)
                         assert action.shape == env.action_space.shape
 
@@ -79,7 +79,7 @@ def train(env, nb_epochs, nb_cycles_per_epoch, nb_episodes_per_cycle, render_eva
                             env.render()
                         assert max_action.shape == action.shape
                         new_obs, r_env, terminal_env, info = env.step(max_action * action) # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
-                        state1 = np.concatenate([new_obs, goal_episode])
+                        state1 = agent.memory.env_wrapper.process_state(new_obs, goal_episode)
                         r, terminal1 = agent.memory.env_wrapper.evaluate_transition(state0,
                                                                                    action,
                                                                                    state1)

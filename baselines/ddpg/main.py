@@ -9,7 +9,8 @@ from baselines.common.misc_util import (
 )
 import baselines.ddpg.training as training
 from baselines.ddpg.models import Actor, Critic
-from baselines.ddpg.memory import Memory, HERBuffer, EnvWrapper
+from baselines.ddpg.memory import BaseMemory, HerMemory, GoalContinuousMCWrapper,\
+    ContinuousMCWrapper, NoRewardMemory, StandardMemory
 from baselines.ddpg.noise import *
 
 import gym
@@ -21,7 +22,7 @@ def run(env_id, seed, noise_type, layer_norm, evaluation, **kwargs):
     rank = MPI.COMM_WORLD.Get_rank()
     if rank != 0: logger.set_level(logger.DISABLED)
     logger.configure(dir='/home/pierre/PycharmProjects/baselines/baselines/ddpg/log',
-                     format_strs=['sdout','json'])
+                     format_strs=['stdout','json','tensorboard'])
 
     # Create envs.
     env = gym.make(env_id)
@@ -59,8 +60,9 @@ def run(env_id, seed, noise_type, layer_norm, evaluation, **kwargs):
 
 
     # Configure components.
-    mountainCarWrapper = EnvWrapper()
-    memory = HERBuffer(mountainCarWrapper, limit=int(1e6), strategy='last')
+    mountainCarWrapper = ContinuousMCWrapper()
+    memory = StandardMemory(mountainCarWrapper, limit=int(1e6))
+    #memory = HerMemory(mountainCarWrapper, limit=int(1e6), strategy='last')
     critic = Critic(layer_norm=layer_norm)
     actor = Actor(nb_actions, layer_norm=layer_norm)
 

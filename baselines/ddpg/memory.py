@@ -48,11 +48,10 @@ class ReplayBuffer(object):
         for name, value in self.contents.items():
             value.append(buffer_item[name])
 
-class Memory(object):
+class BaseMemory(object):
     def __init__(self, limit, content_shape):
         self.limit = limit
         self.buffer = ReplayBuffer(limit, content_shape)
-        self.env_wrapper = None
         self.observation_shape = content_shape['state0']
         self.action_shape = content_shape['action']
 
@@ -80,7 +79,7 @@ class Memory(object):
     def nb_entries(self):
         return len(self.buffer.contents['state0'])
 
-class EnvWrapper(object):
+class GoalContinuousMCWrapper(object):
     def __init__(self):
         # Specific to continuous mountain car
         self.obs_to_goal = [0]
@@ -88,6 +87,9 @@ class EnvWrapper(object):
         self.state_to_goal = [2]
         self.state_shape = (3,)
         self.action_shape = (1,)
+
+    def process_state(self, observation, goal):
+        return np.concatenate(observation,goal)
 
     def evaluate_transition(self, state0, action, state1):
         r = 0
@@ -99,34 +101,60 @@ class EnvWrapper(object):
         return r, term
 
     def sample_goal(self):
-        g = np.random.uniform([-1.2], [0.6], (1,))
+        #g = np.random.uniform([-1.2], [0.6], (1,))
+        g = [0.45]
         return g
 
 
-class StandardMemory(Memory):
-    def __init__(self, limit, observation_shape, action_shape, env_wrapper=None):
-        Memory.__init__(self, limit,
-                        {'state0':observation_shape,
-                         'action':action_shape,
-                         'state1':observation_shape,
+class ContinuousMCWrapper(object):
+    def __init__(self):
+        # Specific to continuous mountain car
+        self.state_shape = (2,)
+        self.action_shape = (1,)
+        self.obs_to_goal = [0]
+
+    def process_state(self, observation, goal):
+        return observation
+
+    def evaluate_transition(self, state0, action, state1):
+        r = 0
+        term = False
+        if state1[self.obs_to_goal] >= 0.45:
+            r += 100
+            term = True
+        r -= math.pow(action[0], 2) * 0.1
+        return r, term
+
+    def sample_goal(self):
+        # g = np.random.uniform([-1.2], [0.6], (1,))
+        g = [0.45]
+        return g
+
+class StandardMemory(BaseMemory):
+    def __init__(self, env_wrapper, limit):
+        self.env_wrapper = env_wrapper
+        self.state_shape = self.env_wrapper.state_shape
+        self.action_shape = self.env_wrapper.action_shape
+        BaseMemory.__init__(self, limit,
+                        {'state0': self.state_shape,
+                         'action': self.action_shape,
+                         'state1':self.state_shape,
                          'reward':(1,),
                          'terminal1':(1,)})
-        self.env_wrapper = env_wrapper
-        if self.env_wrapper is None:
-            self.state_shape = observation_shape
-        else:
-            self.state_shape = self.env_wrapper.state_shape
 
-class NoRewardMemory(Memory):
-    def __init__(self, limit, observation_shape, action_shape, env_wrapper):
-        Memory.__init__(self, limit,
-                        {'state0':observation_shape,
-                         'action':action_shape,
-                         'state1':observation_shape})
+
+class NoRewardMemory(BaseMemory):
+    def __init__(self, env_wrapper, limit):
         # Specific to mountain car continuous
         self.env_wrapper = env_wrapper
         self.state_shape = self.env_wrapper.state_shape
-        self.obs_to_goal = self.env_wrapper.obs_to_goal
+        self.action_shape = self.env_wrapper.action_shape
+
+        BaseMemory.__init__(self, limit,
+                        {'state0': self.state_shape,
+                         'action': self.action_shape,
+                         'state1':self.state_shape})
+
 
 
     def compute_reward(self, state0_batch, action_batch, state1_batch):
@@ -153,20 +181,13 @@ class NoRewardMemory(Memory):
         return result
 
 
-class HERBuffer(StandardMemory):
+class HerMemory(StandardMemory):
     def __init__(self, env_wrapper, limit, strategy):
         """Replay buffer that does Hindsight Experience Replay
         obs_to_goal is a function that converts observations to goals
         goal_slice is a slice of indices of goal in observation
         """
-        self.env_wrapper = env_wrapper
-        self.state_shape = self.env_wrapper.state_shape
-        self.action_shape = self.env_wrapper.action_shape
-        self.state_to_goal = self.env_wrapper.state_to_goal
-        self.state_to_obs = self.env_wrapper.state_to_obs
-        self.obs_to_goal = self.env_wrapper.obs_to_goal
-
-        StandardMemory.__init__(self, limit, self.state_shape, self.action_shape, self.env_wrapper)
+        StandardMemory.__init__(self, limit, env_wrapper)
 
         self.strategy = strategy
         self.data = [] # stores current episode
@@ -179,11 +200,14 @@ class HERBuffer(StandardMemory):
         for buffer_item in self.data:
             super().append(buffer_item)
         if self.strategy=='last':
+            state_to_goal = self.env_wrapper.state_to_goal
+            state_to_obs = self.env_wrapper.state_to_obs
+            obs_to_goal = self.env_wrapper.obs_to_goal
             final_state = self.data[-1]['state1']
-            new_goal = final_state[self.state_to_obs][self.obs_to_goal]
+            new_goal = final_state[state_to_obs][obs_to_goal]
             for buffer_item in self.data:
-                buffer_item['state0'][self.state_to_goal] = new_goal
-                buffer_item['state1'][self.state_to_goal] = new_goal
+                buffer_item['state0'][state_to_goal] = new_goal
+                buffer_item['state1'][state_to_goal] = new_goal
                 buffer_item['reward'], buffer_item['terminal'] = \
                     self.env_wrapper.evaluate_transition(buffer_item['state0'],
                                                            buffer_item['action'],
