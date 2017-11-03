@@ -1,5 +1,5 @@
 import numpy as np
-from gym.spaces import prng
+import math
 
 class RingBuffer(object):
     def __init__(self, maxlen, shape, dtype='float32'):
@@ -38,161 +38,167 @@ def array_min2d(x):
         return x
     return x.reshape(-1, 1)
 
+class ReplayBuffer(object):
+    def __init__(self, limit, content_shape):
+        self.contents = {}
+        for content,shape in content_shape.items():
+            self.contents[content] = RingBuffer(limit, shape=shape)
+
+    def append(self, buffer_item):
+        for name, value in self.contents.items():
+            value.append(buffer_item[name])
 
 class Memory(object):
-    def __init__(self, limit, action_shape, observation_shape):
+    def __init__(self, limit, content_shape):
         self.limit = limit
-
-        self.observations0 = RingBuffer(limit, shape=observation_shape)
-        self.actions = RingBuffer(limit, shape=action_shape)
-        self.rewards = RingBuffer(limit, shape=(1,))
-        self.terminals1 = RingBuffer(limit, shape=(1,))
-        self.observations1 = RingBuffer(limit, shape=observation_shape)
-        self.observation_shape = observation_shape
-        self.action_shape = action_shape
+        self.buffer = ReplayBuffer(limit, content_shape)
+        self.env_wrapper = None
+        self.observation_shape = content_shape['state0']
+        self.action_shape = content_shape['action']
 
     def sample(self, batch_size):
         # Draw such that we always have a proceeding element.
         batch_idxs = np.random.random_integers(self.nb_entries - 2, size=batch_size)
+        result = {}
+        for name, value in self.buffer.contents.items():
+            result[name]=array_min2d(value.get_batch(batch_idxs))
 
-        obs0_batch = self.observations0.get_batch(batch_idxs)
-        obs1_batch = self.observations1.get_batch(batch_idxs)
-        action_batch = self.actions.get_batch(batch_idxs)
-        reward_batch = self.rewards.get_batch(batch_idxs)
-        terminal1_batch = self.terminals1.get_batch(batch_idxs)
-
-        result = {
-            'obs0': array_min2d(obs0_batch),
-            'obs1': array_min2d(obs1_batch),
-            'rewards': array_min2d(reward_batch),
-            'actions': array_min2d(action_batch),
-            'terminals1': array_min2d(terminal1_batch),
-        }
         return result
 
-    def append(self, obs0, action, reward, obs1, terminal1, training=True):
+    def append(self, buffer_item, training=True):
         if not training:
             return
-        
-        self.observations0.append(obs0)
-        self.actions.append(action)
-        self.rewards.append(reward)
-        self.observations1.append(obs1)
-        self.terminals1.append(terminal1)
+        self.buffer.append(buffer_item)
 
     def flush(self):
         pass
 
-    def sample_goal(self):
-        pass
-
-    def compute_reward(self):
-        pass
-
-    def compute_done(self):
+    def compute_reward(self, state0_batch, action_batch, state1_batch):
         pass
 
     @property
     def nb_entries(self):
-        return len(self.observations0)
+        return len(self.buffer.contents['state0'])
 
-class HERBuffer(Memory):
-    def __init__(self, limit, action_shape, observation_space, strategy, goal_space):
+class EnvWrapper(object):
+    def __init__(self):
+        # Specific to continuous mountain car
+        self.obs_to_goal = [0]
+        self.state_to_obs = [0,1]
+        self.state_to_goal = [2]
+        self.state_shape = (3,)
+        self.action_shape = (1,)
+
+    def evaluate_transition(self, state0, action, state1):
+        r = 0
+        term = False
+        if state1[self.state_to_obs][self.obs_to_goal] >= 0.45:
+            r += 100
+            term = True
+        r -= math.pow(action[0], 2) * 0.1
+        return r, term
+
+    def sample_goal(self):
+        g = np.random.uniform([-1.2], [0.6], (1,))
+        return g
+
+
+class StandardMemory(Memory):
+    def __init__(self, limit, observation_shape, action_shape, env_wrapper=None):
+        Memory.__init__(self, limit,
+                        {'state0':observation_shape,
+                         'action':action_shape,
+                         'state1':observation_shape,
+                         'reward':(1,),
+                         'terminal1':(1,)})
+        self.env_wrapper = env_wrapper
+        if self.env_wrapper is None:
+            self.state_shape = observation_shape
+        else:
+            self.state_shape = self.env_wrapper.state_shape
+
+class NoRewardMemory(Memory):
+    def __init__(self, limit, observation_shape, action_shape, env_wrapper):
+        Memory.__init__(self, limit,
+                        {'state0':observation_shape,
+                         'action':action_shape,
+                         'state1':observation_shape})
+        # Specific to mountain car continuous
+        self.env_wrapper = env_wrapper
+        self.state_shape = self.env_wrapper.state_shape
+        self.obs_to_goal = self.env_wrapper.obs_to_goal
+
+
+    def compute_reward(self, state0_batch, action_batch, state1_batch):
+        batch_size = state0_batch.shape[0]
+        rewards = []
+        terminals = []
+        for idx in range(batch_size):
+            r, term = self.env_wrapper.evaluate_transition(state0_batch[idx],
+                                                             action_batch[idx],
+                                                             state1_batch[idx])
+            rewards.append(r)
+            terminals.append(term)
+        return array_min2d(rewards), array_min2d(terminals)
+
+    def sample(self, batch_size):
+        batch_idxs = np.random.random_integers(self.nb_entries - 2, size=batch_size)
+        result = {}
+        for name, value in self.buffer.contents:
+            result[name] = array_min2d(value.get_batch(batch_idxs))
+
+        result['rewards'], result['terminals1'] = self.compute_reward(result['state0'],
+                                                            result['action'],
+                                                            result['state1'])
+        return result
+
+
+class HERBuffer(StandardMemory):
+    def __init__(self, env_wrapper, limit, strategy):
         """Replay buffer that does Hindsight Experience Replay
         obs_to_goal is a function that converts observations to goals
         goal_slice is a slice of indices of goal in observation
         """
-        self.goal_space = goal_space
-        self.observation_shape = np.array(observation_space.shape)
-        if self.goal_space == 'full':
-            self.observation_shape[0] += self.observation_shape[0]
-            self.obs_goal_to_goal = range(self.observation_shape[0] // 2, self.observation_shape[0])
-            self.obs_goal_to_state = range(self.observation_shape[0] // 2)
-            self.obs_to_goal = range(self.observation_shape[0] // 2)
-        elif self.goal_space == 'position' or self.goal_space == 'env':
-            self.observation_shape[0] += 1
-            self.obs_goal_to_goal = range(self.observation_shape[0]-1, self.observation_shape[0])
-            self.obs_goal_to_state = range(self.observation_shape[0]-1)
-            self.obs_to_goal = range(self.observation_shape[0]-2)
+        self.env_wrapper = env_wrapper
+        self.state_shape = self.env_wrapper.state_shape
+        self.action_shape = self.env_wrapper.action_shape
+        self.state_to_goal = self.env_wrapper.state_to_goal
+        self.state_to_obs = self.env_wrapper.state_to_obs
+        self.obs_to_goal = self.env_wrapper.obs_to_goal
 
-        else:
-            print("goal space strategy not implemented")
-            return
+        StandardMemory.__init__(self, limit, self.state_shape, self.action_shape, self.env_wrapper)
 
-        self.observation_shape = tuple(self.observation_shape)
-
-        Memory.__init__(self, limit, action_shape, self.observation_shape)
         self.strategy = strategy
         self.data = [] # stores current episode
-
-        self.observation_space = observation_space
-        self.epsilon = 0.1
-
-    # TODO : better management of raise errors
-    def compute_reward(self, obs_goal):
-        obs = obs_goal[self.obs_goal_to_state]
-        goal = obs_goal[self.obs_goal_to_goal]
-        r=0
-        if self.goal_space == 'full'and np.linalg.norm(obs-goal,1)<self.epsilon:
-            r += 1
-        elif self.goal_space == 'position' and np.linalg.norm(obs[self.obs_to_goal]-goal,1)<self.epsilon:
-            r += 1
-        elif self.goal_space == 'env' and obs[self.obs_to_goal]>=goal:
-            r += 1
-        return r
-
-    def compute_terminal(self, obs_goal):
-        obs = obs_goal[self.obs_goal_to_state]
-        goal = obs_goal[self.obs_goal_to_goal]
-        terminal = False
-        if self.goal_space == 'full'and np.linalg.norm(obs-goal,1)<self.epsilon:
-            terminal = True
-        elif self.goal_space == 'position' and np.linalg.norm(obs[self.obs_to_goal]-goal,1)<self.epsilon:
-            terminal = True
-        elif self.goal_space == 'env' and obs[self.obs_to_goal][0] >= goal[0]:
-            terminal = True
-        return terminal
-
-    def sample_goal(self):
-        if self.goal_space == 'full':
-            g = self.observation_space.sample()
-        elif self.goal_space == 'position':
-            low = self.observation_space.low[self.obs_to_goal]
-            high = self.observation_space.high[self.obs_to_goal]
-            g = prng.np_random.uniform(low, high, low.shape)
-        elif self.goal_space == 'env':
-            g = [0.45]
-        return g
 
     def flush(self):
         """Dump the current data into the replay buffer with (final) HER"""
         if not self.data:
             return
 
-        for obs0, action, reward, obs1, terminal in self.data:
-            #obs0, action, reward, obs1, terminal = obs0.copy(), action.copy(), reward.copy(), obs1.copy(), terminal.copy()
-            super().append(obs0, action, reward, obs1, terminal)
+        for buffer_item in self.data:
+            super().append(buffer_item)
         if self.strategy=='last':
-            final_obs = self.data[-1][-2]
-            new_goal = final_obs[self.obs_goal_to_state,...][self.obs_to_goal]
-            for obs0, action, _, obs1, _ in self.data:
-                #obs0, action, obs1 = obs0.copy(), action.copy(), obs1.copy()
-                obs0[self.obs_goal_to_goal] = new_goal
-                obs1[self.obs_goal_to_goal] = new_goal
-                reward =self.compute_reward(obs1)
-                terminal = self.compute_terminal(obs1)
-                super().append(obs0, action, reward, obs1, terminal)
+            final_state = self.data[-1]['state1']
+            new_goal = final_state[self.state_to_obs][self.obs_to_goal]
+            for buffer_item in self.data:
+                buffer_item['state0'][self.state_to_goal] = new_goal
+                buffer_item['state1'][self.state_to_goal] = new_goal
+                buffer_item['reward'], buffer_item['terminal'] = \
+                    self.env_wrapper.evaluate_transition(buffer_item['state0'],
+                                                           buffer_item['action'],
+                                                           buffer_item['state1'])
+                super().append(buffer_item)
         else:
             print('error her strategy')
             return
         self.data = []
 
-    def append(self, obs0, action, reward, obs1, terminal, training=True):
+    def append(self, buffer_item, training=True):
         if not training:
             return
-
-        self.data.append((obs0, action, reward, obs1, terminal))
+        self.data.append(buffer_item)
 
     @property
     def nb_entries(self):
-        return len(self.observations0)
+        return len(self.buffer.contents['state0'])

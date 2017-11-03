@@ -67,11 +67,11 @@ def train(env, nb_epochs, nb_cycles_per_epoch, nb_episodes_per_cycle, render_eva
             epoch_adaptive_distances = []
             for cycle in range(nb_cycles_per_epoch):
                 for episode in range(nb_episodes_per_cycle):
-                    goal_episode = agent.memory.sample_goal()
+                    goal_episode = agent.memory.env_wrapper.sample_goal()
                     for step in range(nb_steps_per_episode):
                         # Predict next action.
-                        obs_goal = np.concatenate([obs, goal_episode])
-                        action, q = agent.pi(obs_goal, apply_noise=True, compute_Q=True)
+                        state0 = np.concatenate([obs, goal_episode])
+                        action, q = agent.pi(state0, apply_noise=True, compute_Q=True)
                         assert action.shape == env.action_space.shape
 
                         # Execute next action.
@@ -79,9 +79,10 @@ def train(env, nb_epochs, nb_cycles_per_epoch, nb_episodes_per_cycle, render_eva
                             env.render()
                         assert max_action.shape == action.shape
                         new_obs, r_env, terminal_env, info = env.step(max_action * action) # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
-                        new_obs_goal = np.concatenate([new_obs, goal_episode])
-                        r = agent.memory.compute_reward(new_obs_goal)
-                        terminal = agent.memory.compute_terminal(new_obs_goal)
+                        state1 = np.concatenate([new_obs, goal_episode])
+                        r, terminal1 = agent.memory.env_wrapper.evaluate_transition(state0,
+                                                                                   action,
+                                                                                   state1)
                         t += 1
                         if rank == 0 and render:
                             env.render()
@@ -91,7 +92,12 @@ def train(env, nb_epochs, nb_cycles_per_epoch, nb_episodes_per_cycle, render_eva
                         # Book-keeping.
                         epoch_actions.append(action)
                         epoch_qs.append(q)
-                        agent.store_transition(obs_goal, action, r, new_obs_goal, terminal)
+                        buffer_item = {'state0' : state0,
+                                       'action' : action,
+                                       'reward' : r,
+                                       'state1' : state1,
+                                       'terminal1' : terminal1}
+                        agent.store_transition(buffer_item)
                         obs = new_obs
 
                         if terminal:
@@ -129,8 +135,8 @@ def train(env, nb_epochs, nb_cycles_per_epoch, nb_episodes_per_cycle, render_eva
                     eval_episode_reward = 0.
                     eval_goal = agent.memory.sample_goal()
                     for t_rollout in range(nb_eval_steps):
-                        eval_obs_goal = np.concatenate([eval_obs, eval_goal])
-                        eval_action, eval_q = agent.pi(eval_obs_goal, apply_noise=False, compute_Q=True)
+                        eval_state = np.concatenate([eval_obs, eval_goal])
+                        eval_action, eval_q = agent.pi(eval_state, apply_noise=False, compute_Q=True)
                         eval_obs, eval_r, eval_done, eval_info = eval_env.step(max_action * eval_action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
                         if render_eval:
                             eval_env.render()

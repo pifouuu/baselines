@@ -265,11 +265,11 @@ class DDPG(object):
         action = np.clip(action, self.action_range[0], self.action_range[1])
         return action, q
 
-    def store_transition(self, obs0, action, reward, obs1, terminal1):
-        reward *= self.reward_scale
-        self.memory.append(obs0, action, reward, obs1, terminal1)
+    def store_transition(self, buffer_item):
+        buffer_item['reward'] *= self.reward_scale
+        self.memory.append(buffer_item)
         if self.normalize_observations:
-            self.obs_rms.update(np.array([obs0]))
+            self.obs_rms.update(np.array([buffer_item['state0']]))
 
     def train(self):
         # Get a batch.
@@ -277,9 +277,9 @@ class DDPG(object):
 
         if self.normalize_returns and self.enable_popart:
             old_mean, old_std, target_Q = self.sess.run([self.ret_rms.mean, self.ret_rms.std, self.target_Q], feed_dict={
-                self.obs1: batch['obs1'],
-                self.rewards: batch['rewards'],
-                self.terminals1: batch['terminals1'].astype('float32'),
+                self.obs1: batch['state1'],
+                self.rewards: batch['reward'],
+                self.terminals1: batch['terminal1'].astype('float32'),
             })
             self.ret_rms.update(target_Q.flatten())
             self.sess.run(self.renormalize_Q_outputs_op, feed_dict={
@@ -298,16 +298,16 @@ class DDPG(object):
             # assert (np.abs(target_Q - target_Q_new) < 1e-3).all()
         else:
             target_Q = self.sess.run(self.target_Q, feed_dict={
-                self.obs1: batch['obs1'],
-                self.rewards: batch['rewards'],
-                self.terminals1: batch['terminals1'].astype('float32'),
+                self.obs1: batch['state1'],
+                self.rewards: batch['reward'],
+                self.terminals1: batch['terminal1'].astype('float32'),
             })
 
         # Get all gradients and perform a synced update.
         ops = [self.actor_grads, self.actor_loss, self.critic_grads, self.critic_loss]
         actor_grads, actor_loss, critic_grads, critic_loss = self.sess.run(ops, feed_dict={
-            self.obs0: batch['obs0'],
-            self.actions: batch['actions'],
+            self.obs0: batch['state0'],
+            self.actions: batch['action'],
             self.critic_target: target_Q,
         })
         self.actor_optimizer.update(actor_grads, stepsize=self.actor_lr)
@@ -331,8 +331,8 @@ class DDPG(object):
             # This allows us to estimate the change in value for the same set of inputs.
             self.stats_sample = self.memory.sample(batch_size=self.batch_size)
         values = self.sess.run(self.stats_ops, feed_dict={
-            self.obs0: self.stats_sample['obs0'],
-            self.actions: self.stats_sample['actions'],
+            self.obs0: self.stats_sample['state0'],
+            self.actions: self.stats_sample['action'],
         })
 
         names = self.stats_names[:]
@@ -354,7 +354,7 @@ class DDPG(object):
             self.param_noise_stddev: self.param_noise.current_stddev,
         })
         distance = self.sess.run(self.adaptive_policy_distance, feed_dict={
-            self.obs0: batch['obs0'],
+            self.obs0: batch['state0'],
             self.param_noise_stddev: self.param_noise.current_stddev,
         })
 
