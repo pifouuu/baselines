@@ -17,7 +17,7 @@ import gym
 import tensorflow as tf
 from mpi4py import MPI
 
-def run(env_id, seed, noise_type, layer_norm, evaluation, **kwargs):
+def run(env_id, seed, noise_type, memory_type, layer_norm, evaluation, **kwargs):
     # Configure things.
     # rank = MPI.COMM_WORLD.Get_rank()
     # if rank != 0: logger.set_level(logger.DISABLED)
@@ -63,8 +63,14 @@ def run(env_id, seed, noise_type, layer_norm, evaluation, **kwargs):
 
     # Configure components.
     mountainCarWrapper = ContinuousMCWrapper()
-    memory = StandardMemory(mountainCarWrapper, limit=int(1e6))
-    #memory = HerMemory(mountainCarWrapper, limit=int(1e6), strategy='last')
+    if memory_type=='standard':
+        memory = StandardMemory(mountainCarWrapper, limit=int(1e6))
+    elif memory_type=='her':
+        memory = HerMemory(mountainCarWrapper, limit=int(1e6), strategy='last')
+    elif memory_type=='no_reward':
+        memory = NoRewardMemory(mountainCarWrapper, limit=int(1e6))
+    else:
+        raise RuntimeError('unknown memory type "{}"'.format(memory_type))
     critic = Critic(layer_norm=layer_norm)
     actor = Actor(nb_actions, layer_norm=layer_norm)
 
@@ -113,6 +119,7 @@ def parse_args():
     parser.add_argument('--nb-eval-steps', type=int, default=1000)  # per epoch cycle and MPI worker
     parser.add_argument('--nb-rollout-steps', type=int, default=100)  # per epoch cycle and MPI worker
     parser.add_argument('--noise-type', type=str, default='ou_0.3')  # choices are adaptive-param_xx, ou_xx, normal_xx, none
+    parser.add_argument('--memory-type', type=str, default='standard') # choices are standard, her, no_reward
     boolean_flag(parser, 'evaluation', default=False)
     return vars(parser.parse_args())
 

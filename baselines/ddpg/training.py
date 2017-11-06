@@ -71,7 +71,6 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
             episode_reward = 0.
             agent.reset()
             obs = env.reset()
-            explo = min(episode / 100, 1)
 
             for iter in range(1000):
                 # Predict next action.
