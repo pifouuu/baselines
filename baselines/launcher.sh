@@ -6,4 +6,4 @@
 #PBS -M pierre.fournier@isir.upmc.fr
 #PBS -l walltime=00:01:00
 #PBS -l ncpus=1
-date 
+/usr/bin/python3.5 /home/pierre/PycharmProjects/baselines/baselines/ddpg/main.py --env-wrapper-type standard
