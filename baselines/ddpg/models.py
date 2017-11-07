@@ -24,6 +24,8 @@ class Actor(Model):
         super(Actor, self).__init__(name=name)
         self.nb_actions = nb_actions
         self.layer_norm = layer_norm
+        self.batch_norm = batch_norm
+
 
     def __call__(self, obs, reuse=False):
         with tf.variable_scope(self.name) as scope:
@@ -51,9 +53,10 @@ class Actor(Model):
 
 
 class Critic(Model):
-    def __init__(self, name='critic', layer_norm=True):
+    def __init__(self, name='critic', layer_norm=True, batch_norm=True):
         super(Critic, self).__init__(name=name)
         self.layer_norm = layer_norm
+        self.batch_norm = batch_norm
 
     def __call__(self, obs, action, reuse=False):
         with tf.variable_scope(self.name) as scope:

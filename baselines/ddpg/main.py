@@ -108,11 +108,10 @@ def parse_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--env-id', type=str, default='MountainCarContinuous-v0')
     boolean_flag(parser, 'render-eval', default=False)
-    boolean_flag(parser, 'norm-type', type=str, default='none') # Choices are batch, layer or none
     boolean_flag(parser, 'render', default=False)
     boolean_flag(parser, 'normalize-returns', default=False)
     boolean_flag(parser, 'normalize-observations', default=False)
-    parser.add_argument('--seed', help='RNG seed', type=int, default=21)
+    parser.add_argument('--seed', help='RNG seed', type=int, default=1234)
     parser.add_argument('--critic-l2-reg', type=float, default=0.01)
     parser.add_argument('--batch-size', type=int, default=64)  # per MPI worker
     parser.add_argument('--actor-lr', type=float, default=1e-4)
@@ -121,14 +120,15 @@ def parse_args():
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--reward-scale', type=float, default=1.)
     parser.add_argument('--clip-norm', type=float, default=None)
-    parser.add_argument('--nb-epochs', type=int, default=10000)  # with default settings, perform 1M steps total
-    parser.add_argument('--nb-epoch-cycles', type=int, default=1)
+    parser.add_argument('--nb-episodes', type=int, default=10000)  # with default settings, perform 1M steps total
     parser.add_argument('--nb-train-steps', type=int, default=50)  # per epoch cycle and MPI worker
+    parser.add_argument('--train-freq', type=int, default=1)
     parser.add_argument('--nb-eval-steps', type=int, default=1000)  # per epoch cycle and MPI worker
-    parser.add_argument('--nb-rollout-steps', type=int, default=100)  # per epoch cycle and MPI worker
+    parser.add_argument('--nb-rollout-steps', type=int, default=1000)  # per epoch cycle and MPI worker
     parser.add_argument('--noise-type', type=str, default='ou_0.3')  # choices are adaptive-param_xx, ou_xx, normal_xx, none
     parser.add_argument('--memory-type', type=str, default='standard') # choices are standard, her, no_reward
     parser.add_argument('--env-wrapper-type', type=str, default='standard') # choices are standard and goal
+    parser.add_argument('--norm-type', type=str, default='none')  # Choices are batch, layer or none
     boolean_flag(parser, 'evaluation', default=False)
     return vars(parser.parse_args())
 

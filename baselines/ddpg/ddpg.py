@@ -134,7 +134,7 @@ class DDPG(object):
         self.setup_critic_optimizer()
         if self.normalize_returns and self.enable_popart:
             self.setup_popart()
-        # self.setup_stats()
+        self.setup_stats()
 
     def setup_target_network_updates(self):
         actor_init_updates, actor_soft_updates = get_target_updates(self.actor.vars, self.target_actor.vars, self.tau)
@@ -177,7 +177,8 @@ class DDPG(object):
     def setup_critic_optimizer(self):
         logger.info('setting up critic optimizer')
         normalized_critic_target_tf = tf.clip_by_value(normalize(self.critic_target, self.ret_rms), self.return_range[0], self.return_range[1])
-        self.critic_loss = tf.reduce_mean(tf.square(self.normalized_critic_tf - normalized_critic_target_tf))
+        #self.critic_loss = tf.reduce_mean(tf.square(self.normalized_critic_tf - normalized_critic_target_tf))
+        self.critic_loss = tf.losses.huber_loss(normalized_critic_target_tf, self.normalized_critic_tf, delta=1)
         if self.critic_l2_reg > 0.:
             critic_reg_vars = [var for var in self.critic.trainable_vars if 'kernel' in var.name and 'output' not in var.name]
             for var in critic_reg_vars:
@@ -218,41 +219,41 @@ class DDPG(object):
             self.renormalize_Q_outputs_op += [M.assign(M * self.old_std / new_std)]
             self.renormalize_Q_outputs_op += [b.assign((b * self.old_std + self.old_mean - new_mean) / new_std)]
 
-    # def setup_stats(self):
-    #     ops = []
-    #     names = []
-    #
-    #     if self.normalize_returns:
-    #         ops += [self.ret_rms.mean, self.ret_rms.std]
-    #         names += ['ret_rms_mean', 'ret_rms_std']
-    #
-    #     if self.normalize_observations:
-    #         ops += [tf.reduce_mean(self.obs_rms.mean), tf.reduce_mean(self.obs_rms.std)]
-    #         names += ['obs_rms_mean', 'obs_rms_std']
-    #
-    #     ops += [tf.reduce_mean(self.critic_tf)]
-    #     names += ['reference_Q_mean']
-    #     ops += [reduce_std(self.critic_tf)]
-    #     names += ['reference_Q_std']
-    #
-    #     ops += [tf.reduce_mean(self.critic_with_actor_tf)]
-    #     names += ['reference_actor_Q_mean']
-    #     ops += [reduce_std(self.critic_with_actor_tf)]
-    #     names += ['reference_actor_Q_std']
-    #
-    #     ops += [tf.reduce_mean(self.actor_tf)]
-    #     names += ['reference_action_mean']
-    #     ops += [reduce_std(self.actor_tf)]
-    #     names += ['reference_action_std']
-    #
-    #     if self.param_noise:
-    #         ops += [tf.reduce_mean(self.perturbed_actor_tf)]
-    #         names += ['reference_perturbed_action_mean']
-    #         ops += [reduce_std(self.perturbed_actor_tf)]
-    #         names += ['reference_perturbed_action_std']
-    #
-    #     self.stats_ops = ops
-    #     self.stats_names = names
+    def setup_stats(self):
+        ops = []
+        names = []
+
+        if self.normalize_returns:
+            ops += [self.ret_rms.mean, self.ret_rms.std]
+            names += ['ret_rms_mean', 'ret_rms_std']
+
+        if self.normalize_observations:
+            ops += [tf.reduce_mean(self.obs_rms.mean), tf.reduce_mean(self.obs_rms.std)]
+            names += ['obs_rms_mean', 'obs_rms_std']
+
+        ops += [tf.reduce_mean(self.critic_tf)]
+        names += ['reference_Q_mean']
+        ops += [reduce_std(self.critic_tf)]
+        names += ['reference_Q_std']
+
+        ops += [tf.reduce_mean(self.critic_with_actor_tf)]
+        names += ['reference_actor_Q_mean']
+        ops += [reduce_std(self.critic_with_actor_tf)]
+        names += ['reference_actor_Q_std']
+
+        ops += [tf.reduce_mean(self.actor_tf)]
+        names += ['reference_action_mean']
+        ops += [reduce_std(self.actor_tf)]
+        names += ['reference_action_std']
+
+        if self.param_noise:
+            ops += [tf.reduce_mean(self.perturbed_actor_tf)]
+            names += ['reference_perturbed_action_mean']
+            ops += [reduce_std(self.perturbed_actor_tf)]
+            names += ['reference_perturbed_action_std']
+
+        self.stats_ops = ops
+        self.stats_names = names
 
     def pi(self, obs, apply_noise=True, compute_Q=True):
         if self.param_noise is not None and apply_noise:
