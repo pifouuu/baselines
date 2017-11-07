@@ -78,6 +78,8 @@ def run(env_id, seed, noise_type, memory_type, env_wrapper_type, norm_type, eval
         layer_norm = True
     elif norm_type=='batch':
         batch_norm = True
+    elif norm_type=='none':
+        pass
     else:
         raise RuntimeError('unknown norm type "{}"'.format(norm_type))
 
@@ -106,7 +108,7 @@ def parse_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--env-id', type=str, default='MountainCarContinuous-v0')
     boolean_flag(parser, 'render-eval', default=False)
-    boolean_flag(parser, 'norm-type', type=str, default='layer')
+    boolean_flag(parser, 'norm-type', type=str, default='none') # Choices are batch, layer or none
     boolean_flag(parser, 'render', default=False)
     boolean_flag(parser, 'normalize-returns', default=False)
     boolean_flag(parser, 'normalize-observations', default=False)
