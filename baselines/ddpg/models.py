@@ -20,7 +20,7 @@ class Model(object):
 
 
 class Actor(Model):
-    def __init__(self, nb_actions, name='actor', layer_norm=True):
+    def __init__(self, nb_actions, name='actor', layer_norm=True, batch_norm=True):
         super(Actor, self).__init__(name=name)
         self.nb_actions = nb_actions
         self.layer_norm = layer_norm
@@ -32,13 +32,15 @@ class Actor(Model):
 
             x = obs
             x = tf.layers.dense(x, 400)
-            x = tc.layers.batch_norm(x)
+            if self.batch_norm:
+                x = tc.layers.batch_norm(x, center=True, scale=True)
             if self.layer_norm:
                 x = tc.layers.layer_norm(x, center=True, scale=True)
             x = tf.nn.relu(x)
             
             x = tf.layers.dense(x, 300)
-            x = tc.layers.batch_norm(x)
+            if self.batch_norm:
+                x = tc.layers.batch_norm(x, center=True, scale=True)
             if self.layer_norm:
                 x = tc.layers.layer_norm(x, center=True, scale=True)
             x = tf.nn.relu(x)
@@ -60,16 +62,16 @@ class Critic(Model):
 
             x = obs
             x = tf.layers.dense(x, 400)
-            x = tc.layers.batch_norm(x)
-
+            if self.batch_norm:
+                x = tc.layers.batch_norm(x, center=True, scale=True)
             if self.layer_norm:
                 x = tc.layers.layer_norm(x, center=True, scale=True)
             x = tf.nn.relu(x)
 
             x = tf.concat([x, action], axis=-1)
             x = tf.layers.dense(x, 300)
-            x = tc.layers.batch_norm(x)
-
+            if self.batch_norm:
+                x = tc.layers.batch_norm(x, center=True, scale=True)
             if self.layer_norm:
                 x = tc.layers.layer_norm(x, center=True, scale=True)
             x = tf.nn.relu(x)
