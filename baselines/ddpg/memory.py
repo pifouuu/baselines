@@ -89,7 +89,7 @@ class GoalContinuousMCWrapper(object):
         self.action_shape = (1,)
 
     def process_state(self, observation, goal):
-        return np.concatenate(observation,goal)
+        return np.concatenate([observation,goal])
 
     def evaluate_transition(self, state0, action, state1):
         r = 0
@@ -102,7 +102,7 @@ class GoalContinuousMCWrapper(object):
 
     def sample_goal(self):
         #g = np.random.uniform([-1.2], [0.6], (1,))
-        g = [0.45]
+        g = np.array([0.45])
         return g
 
 
