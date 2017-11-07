@@ -20,7 +20,7 @@ def train(env, nb_episodes, render_eval, reward_scale, render, param_noise, acto
     assert (np.abs(env.action_space.low) == env.action_space.high).all()  # we assume symmetric actions.
     max_action = env.action_space.high
     logger.info('scaling actions by {} before executing in env'.format(max_action))
-    agent = DDPG(actor, critic, memory, env.observation_space.shape, env.action_space.shape,
+    agent = DDPG(actor, critic, memory, memory.state_shape, memory.action_shape,
                  gamma=gamma, tau=tau, normalize_returns=normalize_returns,
                  normalize_observations=normalize_observations,
                  batch_size=batch_size, action_noise=action_noise, param_noise=param_noise, critic_l2_reg=critic_l2_reg,
@@ -62,7 +62,11 @@ def train(env, nb_episodes, render_eval, reward_scale, render, param_noise, acto
             obs = env.reset()
 
             # Selects a goal for the current episode
-            goal_episode = agent.memory.env_wrapper.sample_goal()
+            goal_found = False
+            while not goal_found:
+                goal_episode = agent.memory.env_wrapper.sample_goal()
+                state_init = agent.memory.env_wrapper.process_state(obs, goal_episode)
+                goal_found = agent.memory.env_wrapper.evaluate_goal(state_init)
 
             for iter in range(nb_rollout_steps):
 
@@ -107,19 +111,19 @@ def train(env, nb_episodes, render_eval, reward_scale, render, param_noise, acto
                 # Update current observation
                 obs = new_obs
 
-                if done:
+                if terminal1:
                     break
 
-            # Train.
-            if episode % train_freq == 0:
-                episode_actor_losses = []
-                episode_critic_losses = []
-                for t_train in range(nb_train_steps):
-                    if memory.nb_entries >= batch_size * 3:
-                        cl, al = agent.train()
-                        episode_critic_losses.append(cl)
-                        episode_actor_losses.append(al)
-                        agent.update_target_net()
+                # Train.
+                if episode % train_freq == 0:
+                    episode_actor_losses = []
+                    episode_critic_losses = []
+                    for t_train in range(1):
+                        if memory.nb_entries >= batch_size * 3:
+                            cl, al = agent.train()
+                            episode_critic_losses.append(cl)
+                            episode_actor_losses.append(al)
+                            agent.update_target_net()
 
             episode_rewards.append(episode_reward)
             episode_steps.append(episode_step)
@@ -145,7 +149,7 @@ def train(env, nb_episodes, render_eval, reward_scale, render, param_noise, acto
             #             eval_episode_reward = 0.
 
             # Log stats
-            if episode % 20 == 0:
+            if episode % 1 == 0:
                 print('| Reward: {:d} | Episode: {:d}'.format(int(episode_reward), episode))
                 duration = time.time() - start_time
                 stats = agent.get_stats()

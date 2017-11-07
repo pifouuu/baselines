@@ -87,6 +87,7 @@ class GoalContinuousMCWrapper(object):
         self.state_to_goal = [2]
         self.state_shape = (3,)
         self.action_shape = (1,)
+        self.eps = 0.2
 
     def process_state(self, observation, goal):
         return np.concatenate([observation,goal])
@@ -94,15 +95,19 @@ class GoalContinuousMCWrapper(object):
     def evaluate_transition(self, state0, action, state1):
         r = 0
         term = False
-        if state1[self.state_to_obs][self.obs_to_goal] >= 0.45:
+        if np.abs(state1[self.state_to_obs][self.obs_to_goal] - state1[self.state_to_goal]) < self.eps:
             r += 100
             term = True
         r -= math.pow(action[0], 2) * 0.1
         return r, term
 
+    def evaluate_goal(self, state):
+        return np.abs(state[self.state_to_obs][self.obs_to_goal] -
+                      state[self.state_to_goal]) > self.eps
+
     def sample_goal(self):
-        #g = np.random.uniform([-1.2], [0.6], (1,))
-        g = np.array([0.45])
+        g = np.random.uniform([-1.2], [0.6], (1,))
+        #g = np.array([0.45])
         return g
 
 
@@ -124,6 +129,9 @@ class ContinuousMCWrapper(object):
             term = True
         r -= math.pow(action[0], 2) * 0.1
         return r, term
+
+    def evaluate_goal(self, state):
+        return True
 
     def sample_goal(self):
         # g = np.random.uniform([-1.2], [0.6], (1,))

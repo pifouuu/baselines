@@ -260,7 +260,7 @@ class DDPG(object):
             actor_tf = self.perturbed_actor_tf
         else:
             actor_tf = self.actor_tf
-        feed_dict = {self.state0: [obs]}
+        feed_dict = {self.obs0: [obs]}
         if compute_Q:
             action, q = self.sess.run([actor_tf, self.critic_with_actor_tf], feed_dict=feed_dict)
         else:
