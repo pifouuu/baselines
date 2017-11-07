@@ -71,6 +71,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
             episode_reward = 0.
             agent.reset()
             obs = env.reset()
+            goal_episode = agent.memory.env_wrapper.sample_goal()
 
             for iter in range(1000):
                 # Predict next action.
