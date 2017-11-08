@@ -116,7 +116,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
 
                     obs = new_obs
 
-                    if done:
+                    if done or env.needs_reset:
                         # Episode done.
                         epoch_episode_rewards.append(episode_reward)
                         episode_rewards_history.append(episode_reward)
@@ -125,10 +125,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                         episode_step = 0
                         epoch_episodes += 1
                         episodes += 1
-
                         agent.reset()
-
-                    if env.needs_reset:
                         obs = env.reset()
 
                 # Train.
