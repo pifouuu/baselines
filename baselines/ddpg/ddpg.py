@@ -129,12 +129,12 @@ class DDPG(object):
         # Set up parts.
         if self.param_noise is not None:
             self.setup_param_noise(normalized_obs0)
-        self.setup_target_network_updates()
         self.setup_actor_optimizer()
         self.setup_critic_optimizer()
         if self.normalize_returns and self.enable_popart:
             self.setup_popart()
         self.setup_stats()
+        self.setup_target_network_updates()
 
     def setup_target_network_updates(self):
         actor_init_updates, actor_soft_updates = get_target_updates(self.actor.vars, self.target_actor.vars, self.tau)
@@ -166,19 +166,15 @@ class DDPG(object):
         actor_nb_params = sum([reduce(lambda x, y: x * y, shape) for shape in actor_shapes])
         logger.info('  actor shapes: {}'.format(actor_shapes))
         logger.info('  actor params: {}'.format(actor_nb_params))
-        #self.actor_grads = U.flatgrad(self.actor_loss, self.actor.trainable_vars, clip_norm=self.clip_norm)
-        # self.actor_optimizer = MpiAdam(var_list=self.actor.trainable_vars,
-        #     beta1=0.9, beta2=0.999, epsilon=1e-08)
-        self.actor_optimizer = tf.train.AdamOptimizer(self.actor_lr)
-        self.actor_grads = self.actor_optimizer.compute_gradients(self.actor_loss,
-                                                                  self.actor.trainable_vars)
-        self.apply_actor_grads = self.actor_optimizer.apply_gradients(self.actor_grads)
+        self.actor_grads = U.flatgrad(self.actor_loss, self.actor.trainable_vars, clip_norm=self.clip_norm)
+        self.actor_optimizer = MpiAdam(var_list=self.actor.trainable_vars,
+            beta1=0.9, beta2=0.999, epsilon=1e-08)
 
     def setup_critic_optimizer(self):
         logger.info('setting up critic optimizer')
         normalized_critic_target_tf = tf.clip_by_value(normalize(self.critic_target, self.ret_rms), self.return_range[0], self.return_range[1])
-        #self.critic_loss = tf.reduce_mean(tf.square(self.normalized_critic_tf - normalized_critic_target_tf))
-        self.critic_loss = tf.losses.huber_loss(normalized_critic_target_tf, self.normalized_critic_tf, delta=1)
+        self.critic_loss = tf.reduce_mean(tf.square(self.normalized_critic_tf - normalized_critic_target_tf))
+        #self.critic_loss = tf.losses.huber_loss(normalized_critic_target_tf, self.normalized_critic_tf, delta=1)
         if self.critic_l2_reg > 0.:
             critic_reg_vars = [var for var in self.critic.trainable_vars if 'kernel' in var.name and 'output' not in var.name]
             for var in critic_reg_vars:
@@ -193,13 +189,9 @@ class DDPG(object):
         critic_nb_params = sum([reduce(lambda x, y: x * y, shape) for shape in critic_shapes])
         logger.info('  critic shapes: {}'.format(critic_shapes))
         logger.info('  critic params: {}'.format(critic_nb_params))
-        #self.critic_grads = U.flatgrad(self.critic_loss, self.critic.trainable_vars, clip_norm=self.clip_norm)
-        # self.critic_optimizer = MpiAdam(var_list=self.critic.trainable_vars,
-        #     beta1=0.9, beta2=0.999, epsilon=1e-08)
-        self.critic_optimizer = tf.train.AdamOptimizer(self.critic_lr)
-        self.critic_grads = self.critic_optimizer.compute_gradients(self.critic_loss,
-                                                                  self.critic.trainable_vars)
-        self.apply_critic_grads = self.critic_optimizer.apply_gradients(self.critic_grads)
+        self.critic_grads = U.flatgrad(self.critic_loss, self.critic.trainable_vars, clip_norm=self.clip_norm)
+        self.critic_optimizer = MpiAdam(var_list=self.critic.trainable_vars,
+            beta1=0.9, beta2=0.999, epsilon=1e-08)
 
     def setup_popart(self):
         # See https://arxiv.org/pdf/1602.07714.pdf for details.
@@ -313,8 +305,8 @@ class DDPG(object):
             })
 
         # Get all gradients and perform a synced update.
-        ops = [self.apply_actor_grads, self.actor_loss, self.apply_critic_grads, self.critic_loss]
-        actor_optimize, actor_loss, critic_optimize, critic_loss = self.sess.run(ops, feed_dict={
+        ops = [self.actor_grads, self.actor_loss, self.critic_grads, self.critic_loss]
+        actor_grads, actor_loss, critic_grads, critic_loss = self.sess.run(ops, feed_dict={
             self.obs0: batch['state0'],
             self.actions: batch['action'],
             self.critic_target: target_Q,
@@ -325,8 +317,8 @@ class DDPG(object):
     def initialize(self, sess):
         self.sess = sess
         self.sess.run(tf.global_variables_initializer())
-        # self.actor_optimizer.sync()
-        # self.critic_optimizer.sync()
+        self.actor_optimizer.sync()
+        self.critic_optimizer.sync()
         self.sess.run(self.target_init_updates)
 
     def update_target_net(self):
@@ -351,23 +343,23 @@ class DDPG(object):
 
         return stats
 
-    # def adapt_param_noise(self):
-    #     if self.param_noise is None:
-    #         return 0.
-    #
-    #     # Perturb a separate copy of the policy to adjust the scale for the next "real" perturbation.
-    #     batch = self.memory.sample(batch_size=self.batch_size)
-    #     self.sess.run(self.perturb_adaptive_policy_ops, feed_dict={
-    #         self.param_noise_stddev: self.param_noise.current_stddev,
-    #     })
-    #     distance = self.sess.run(self.adaptive_policy_distance, feed_dict={
-    #         self.obs0: batch['obs0'],
-    #         self.param_noise_stddev: self.param_noise.current_stddev,
-    #     })
-    #
-    #     mean_distance = mpi_mean(distance)
-    #     self.param_noise.adapt(mean_distance)
-    #     return mean_distance
+    def adapt_param_noise(self):
+        if self.param_noise is None:
+            return 0.
+
+        # Perturb a separate copy of the policy to adjust the scale for the next "real" perturbation.
+        batch = self.memory.sample(batch_size=self.batch_size)
+        self.sess.run(self.perturb_adaptive_policy_ops, feed_dict={
+            self.param_noise_stddev: self.param_noise.current_stddev,
+        })
+        distance = self.sess.run(self.adaptive_policy_distance, feed_dict={
+            self.obs0: batch['obs0'],
+            self.param_noise_stddev: self.param_noise.current_stddev,
+        })
+
+        mean_distance = mpi_mean(distance)
+        self.param_noise.adapt(mean_distance)
+        return mean_distance
 
     def reset(self):
         # Reset internal state after an episode is complete.
@@ -377,4 +369,3 @@ class DDPG(object):
             self.sess.run(self.perturb_policy_ops, feed_dict={
                 self.param_noise_stddev: self.param_noise.current_stddev,
             })
-
