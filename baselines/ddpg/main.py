@@ -9,7 +9,7 @@ from baselines.common.misc_util import (
 )
 import baselines.ddpg.training as training
 from baselines.ddpg.models import Actor, Critic
-from baselines.ddpg.memory import BaseMemory, HerMemory, GoalContinuousMCWrapper,\
+from baselines.ddpg.memory import BaseMemory, Memory, HerMemory, GoalContinuousMCWrapper,\
     ContinuousMCWrapper, NoRewardMemory, StandardMemory
 from baselines.ddpg.noise import *
 
@@ -24,7 +24,7 @@ def run(env_id, seed, noise_type, memory_type, env_wrapper_type, layer_norm, eva
     env = gym.make(env_id)
     env = bench.Monitor(env, logger.get_dir() and os.path.join(logger.get_dir(), "%i.monitor.json"%rank))
     gym.logger.setLevel(logging.WARN)
-    name = noise_type+'_'+memory_type
+    name = 'test_Memory'
     logger.configure(dir='/home/pierre/PycharmProjects/baselines/baselines/ddpg/log/'+name,
                      format_strs=['stdout', 'json', 'tensorboard'])
 
@@ -72,6 +72,9 @@ def run(env_id, seed, noise_type, memory_type, env_wrapper_type, layer_norm, eva
     else:
         raise RuntimeError('unknown memory type "{}"'.format(memory_type))
 
+    ## FOR TESTING
+    memory = Memory(limit=int(1e6), action_shape=env.action_space.shape, observation_shape=env.observation_space.shape)
+
     # Critic and actor
     critic = Critic(layer_norm=layer_norm)
     actor = Actor(nb_actions, layer_norm=layer_norm)
@@ -108,7 +111,7 @@ def parse_args():
     boolean_flag(parser, 'render', default=False)
     boolean_flag(parser, 'normalize-returns', default=False)
     boolean_flag(parser, 'normalize-observations', default=True)
-    parser.add_argument('--seed', help='RNG seed', type=int, default=0)
+    parser.add_argument('--seed', help='RNG seed', type=int, default=456)
     parser.add_argument('--critic-l2-reg', type=float, default=1e-2)
     parser.add_argument('--batch-size', type=int, default=64)  # per MPI worker
     parser.add_argument('--actor-lr', type=float, default=1e-4)
