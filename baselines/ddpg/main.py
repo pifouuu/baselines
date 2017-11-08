@@ -125,7 +125,7 @@ def parse_args():
     parser.add_argument('--nb-train-steps', type=int, default=50)  # per epoch cycle and MPI worker
     parser.add_argument('--nb-eval-steps', type=int, default=1000)  # per epoch cycle and MPI worker
     parser.add_argument('--nb-rollout-steps', type=int, default=1000)  # per epoch cycle and MPI worker
-    parser.add_argument('--noise-type', type=str, default='ou_0.3')  # choices are adaptive-param_xx, ou_xx, normal_xx, none
+    parser.add_argument('--noise-type', type=str, default='ou_0.5')  # choices are adaptive-param_xx, ou_xx, normal_xx, none
     parser.add_argument('--memory-type', type=str, default='standard') # choices are standard, her, no_reward
     parser.add_argument('--env-wrapper-type', type=str, default='standard') # choices are standard and goal
     boolean_flag(parser, 'evaluation', default=False)
