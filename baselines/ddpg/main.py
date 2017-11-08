@@ -24,7 +24,8 @@ def run(env_id, seed, noise_type, memory_type, env_wrapper_type, layer_norm, eva
     env = gym.make(env_id)
     env = bench.Monitor(env, logger.get_dir() and os.path.join(logger.get_dir(), "%i.monitor.json"%rank))
     gym.logger.setLevel(logging.WARN)
-    logger.configure(dir='/home/pierre/PycharmProjects/baselines/baselines/ddpg/log',
+    name = noise_type+'_'+memory_type
+    logger.configure(dir='/home/pierre/PycharmProjects/baselines/baselines/ddpg/log/'+name,
                      format_strs=['stdout', 'json', 'tensorboard'])
 
     if evaluation and rank==0:
