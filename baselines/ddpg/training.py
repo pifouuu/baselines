@@ -4,6 +4,7 @@ from collections import deque
 import pickle
 
 from baselines.ddpg.ddpg import DDPG
+from baselines.ddpg.util import mpi_mean, mpi_std, mpi_max, mpi_sum
 import baselines.common.tf_util as U
 
 from baselines import logger
@@ -12,10 +13,11 @@ import tensorflow as tf
 from mpi4py import MPI
 
 
-def train(env, nb_episodes, render_eval, reward_scale, render, param_noise, actor, critic,
-          normalize_returns, normalize_observations, critic_l2_reg, actor_lr, critic_lr, action_noise,
-          popart, gamma, clip_norm, nb_rollout_steps, nb_eval_steps, nb_train_steps, train_freq, batch_size, memory,
-          tau=0.01, eval_env=None, param_noise_adaption_interval=50):
+def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, param_noise, actor, critic,
+    normalize_returns, normalize_observations, critic_l2_reg, actor_lr, critic_lr, action_noise,
+    popart, gamma, clip_norm, nb_train_steps, nb_rollout_steps, nb_eval_steps, batch_size, memory,
+    tau=0.01, eval_env=None, param_noise_adaption_interval=50):
+    rank = MPI.COMM_WORLD.Get_rank()
 
     assert (np.abs(env.action_space.low) == env.action_space.high).all()  # we assume symmetric actions.
     max_action = env.action_space.high
@@ -30,167 +32,182 @@ def train(env, nb_episodes, render_eval, reward_scale, render, param_noise, acto
     logger.info(str(agent.__dict__.items()))
 
     # Set up logging stuff only for a single worker.
-    # if rank == 0:
-    #     saver = tf.train.Saver()
-    # else:
-    #     saver = None
+    if rank == 0:
+        saver = tf.train.Saver()
+    else:
+        saver = None
 
+    step = 0
+    episode = 0
     eval_episode_rewards_history = deque(maxlen=100)
     episode_rewards_history = deque(maxlen=100)
-    with tf.Session() as sess:
-
+    with U.single_threaded_session() as sess:
         # Prepare everything.
         agent.initialize(sess)
+        sess.graph.finalize()
+
         agent.reset()
+        obs = env.reset()
         if eval_env is not None:
             eval_obs = eval_env.reset()
+        done = False
+        episode_reward = 0.
+        episode_step = 0
+        episodes = 0
+        t = 0
 
-        total_steps = 0
+        epoch = 0
         start_time = time.time()
-        episode_rewards = []
-        episode_steps = []
-        episode_actions = []
-        episode_qs = []
-        successes = 0
 
-        for episode in range(nb_episodes):
+        epoch_episode_rewards = []
+        epoch_episode_steps = []
+        epoch_episode_eval_rewards = []
+        epoch_episode_eval_steps = []
+        epoch_start_time = time.time()
+        epoch_actions = []
+        epoch_qs = []
+        epoch_episodes = 0
+        for epoch in range(nb_epochs):
+            for cycle in range(nb_epoch_cycles):
+                # Selects a goal for the current episode
+                goal_found = False
+                while not goal_found:
+                    goal_episode = agent.memory.env_wrapper.sample_goal()
+                    state_init = agent.memory.env_wrapper.process_state(obs, goal_episode)
+                    goal_found = agent.memory.env_wrapper.evaluate_goal(state_init)
 
-            # Perform rollouts.
-            episode_step = 0
-            episode_reward = 0.
-            agent.reset()
-            obs = env.reset()
+                for t_rollout in range(nb_rollout_steps):
+                    # Compute state from observation and internal observation (goal)
+                    state0 = agent.memory.env_wrapper.process_state(obs, goal_episode)
 
-            # Selects a goal for the current episode
-            goal_found = False
-            while not goal_found:
-                goal_episode = agent.memory.env_wrapper.sample_goal()
-                state_init = agent.memory.env_wrapper.process_state(obs, goal_episode)
-                goal_found = agent.memory.env_wrapper.evaluate_goal(state_init)
+                    # Predict next action.
+                    action, q = agent.pi(state0, apply_noise=True, compute_Q=True)
+                    assert action.shape == env.action_space.shape
 
-            for iter in range(nb_rollout_steps):
+                    # Execute next action.
+                    if rank == 0 and render:
+                        env.render()
+                    assert max_action.shape == action.shape
+                    new_obs, _, _, info = env.step(max_action * action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
+                    t += 1
+                    if rank == 0 and render:
+                        env.render()
+                    episode_step += 1
 
-                # Compute state from observation and internal observation (goal)
-                state0 = agent.memory.env_wrapper.process_state(obs, goal_episode)
+                    # Compute next state from next observation and internal observation (goal)
+                    state1 = agent.memory.env_wrapper.process_state(new_obs, goal_episode)
 
-                # Predict next action.
-                action, q = agent.pi(state0, apply_noise=True, compute_Q=True)
+                    # Compute reward and terminal condition from environment wrapper instead of from environment
+                    r, done = agent.memory.env_wrapper.evaluate_transition(state0, action, state1)
 
-                if render:
-                    env.render()
+                    episode_reward += r
 
-                # Perform one step in the environment
-                new_obs, r, done, info = env.step(max_action * action)  # scale for execution in env
+                    # Book-keeping.
+                    epoch_actions.append(action)
+                    epoch_qs.append(q)
 
-                # Compute next state from next observation and internal observation (goal)
-                state1 = agent.memory.env_wrapper.process_state(new_obs, goal_episode)
+                    # Add to experience replay : TODO make it automatic from memory
+                    buffer_item = {'state0': state0,
+                                   'action': action,
+                                   'reward': r,
+                                   'state1': state1,
+                                   'terminal1': done}
+                    agent.store_transition(buffer_item)
 
-                # Compute reward and terminal condition from environment wrapper instead of from environment
-                r, terminal1 = agent.memory.env_wrapper.evaluate_transition(state0, action, state1)
+                    obs = new_obs
 
-                if render:
-                    env.render()
+                    if done:
+                        # Episode done.
+                        epoch_episode_rewards.append(episode_reward)
+                        episode_rewards_history.append(episode_reward)
+                        epoch_episode_steps.append(episode_step)
+                        episode_reward = 0.
+                        episode_step = 0
+                        epoch_episodes += 1
+                        episodes += 1
 
-                # Book-keeping.
-                episode_actions.append(action)
-                episode_qs.append(q)
-                episode_reward += r
-                episode_step += 1
-                total_steps += 1
-                if terminal1:
-                    successes += 1
-
-                # Add to experience replay : TODO make it automatic from memory
-                buffer_item = {'state0': state0,
-                               'action': action,
-                               'reward': r,
-                               'state1': state1,
-                               'terminal1': terminal1}
-                agent.store_transition(buffer_item)
-
-                # Update current observation
-                obs = new_obs
-
-                if terminal1:
-                    break
+                        agent.reset()
+                        obs = env.reset()
 
                 # Train.
-                if episode % train_freq == 0:
-                    episode_actor_losses = []
-                    episode_critic_losses = []
-                    for t_train in range(1):
-                        if memory.nb_entries >= batch_size * 3:
-                            cl, al = agent.train()
-                            episode_critic_losses.append(cl)
-                            episode_actor_losses.append(al)
-                            agent.update_target_net()
+                epoch_actor_losses = []
+                epoch_critic_losses = []
+                epoch_adaptive_distances = []
+                for t_train in range(nb_train_steps):
+                    # Adapt param noise, if necessary.
+                    if memory.nb_entries >= batch_size and t % param_noise_adaption_interval == 0:
+                        distance = agent.adapt_param_noise()
+                        epoch_adaptive_distances.append(distance)
 
-            episode_rewards.append(episode_reward)
-            episode_steps.append(episode_step)
+                    cl, al = agent.train()
+                    epoch_critic_losses.append(cl)
+                    epoch_actor_losses.append(al)
+                    agent.update_target_net()
 
-            # # Evaluate.
-            # eval_episode_rewards = []
-            # eval_qs = []
-            # if eval_env is not None:
-            #     eval_episode_reward = 0.
-            #     for t_rollout in range(nb_eval_steps):
-            #         eval_action, eval_q = agent.pi(eval_obs, apply_noise=False, compute_Q=True)
-            #         eval_obs, eval_r, eval_done, eval_info = eval_env.step(
-            #             max_action * eval_action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
-            #         if render_eval:
-            #             eval_env.render()
-            #         eval_episode_reward += eval_r
-            #
-            #         eval_qs.append(eval_q)
-            #         if eval_done:
-            #             eval_obs = eval_env.reset()
-            #             eval_episode_rewards.append(eval_episode_reward)
-            #             eval_episode_rewards_history.append(eval_episode_reward)
-            #             eval_episode_reward = 0.
+                # Evaluate.
+                eval_episode_rewards = []
+                eval_qs = []
+                if eval_env is not None:
+                    eval_episode_reward = 0.
+                    for t_rollout in range(nb_eval_steps):
+                        eval_action, eval_q = agent.pi(eval_obs, apply_noise=False, compute_Q=True)
+                        eval_obs, eval_r, eval_done, eval_info = eval_env.step(max_action * eval_action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
+                        if render_eval:
+                            eval_env.render()
+                        eval_episode_reward += eval_r
 
-            # Log stats
-            if episode % 1 == 0:
-                print('| Reward: {:d} | Episode: {:d}'.format(int(episode_reward), episode))
-                duration = time.time() - start_time
-                stats = agent.get_stats()
-                combined_stats = {}
-                for key in sorted(stats.keys()):
-                    combined_stats[key] = np.mean(stats[key])
+                        eval_qs.append(eval_q)
+                        if eval_done:
+                            eval_obs = eval_env.reset()
+                            eval_episode_rewards.append(eval_episode_reward)
+                            eval_episode_rewards_history.append(eval_episode_reward)
+                            eval_episode_reward = 0.
 
-                # Rollout statistics.
-                combined_stats['rollout/return'] = np.mean(episode_rewards)
-                combined_stats['rollout/episode_steps'] = np.mean(episode_steps)
-                combined_stats['rollout/actions_mean'] = np.mean(episode_actions)
-                combined_stats['rollout/actions_std'] = np.std(episode_actions)
-                combined_stats['rollout/Q_mean'] = np.mean(episode_qs)
+            # Log stats.
+            epoch_train_duration = time.time() - epoch_start_time
+            duration = time.time() - start_time
+            stats = agent.get_stats()
+            combined_stats = {}
+            for key in sorted(stats.keys()):
+                combined_stats[key] = mpi_mean(stats[key])
 
-                # Train statistics.
-                combined_stats['train/loss_actor'] = np.mean(episode_actor_losses)
-                combined_stats['train/loss_critic'] = np.mean(episode_critic_losses)
+            # Rollout statistics.
+            combined_stats['rollout/return'] = mpi_mean(epoch_episode_rewards)
+            combined_stats['rollout/return_history'] = mpi_mean(np.mean(episode_rewards_history))
+            combined_stats['rollout/episode_steps'] = mpi_mean(epoch_episode_steps)
+            combined_stats['rollout/episodes'] = mpi_sum(epoch_episodes)
+            combined_stats['rollout/actions_mean'] = mpi_mean(epoch_actions)
+            combined_stats['rollout/actions_std'] = mpi_std(epoch_actions)
+            combined_stats['rollout/Q_mean'] = mpi_mean(epoch_qs)
 
-                # # Evaluation statistics.
-                # if eval_env is not None:
-                #     combined_stats['eval/return'] = mpi_mean(eval_episode_rewards)
-                #     combined_stats['eval/return_history'] = mpi_mean(np.mean(eval_episode_rewards_history))
-                #     combined_stats['eval/Q'] = mpi_mean(eval_qs)
-                #     combined_stats['eval/episodes'] = mpi_mean(len(eval_episode_rewards))
+            # Train statistics.
+            combined_stats['train/loss_actor'] = mpi_mean(epoch_actor_losses)
+            combined_stats['train/loss_critic'] = mpi_mean(epoch_critic_losses)
+            combined_stats['train/param_noise_distance'] = mpi_mean(epoch_adaptive_distances)
 
-                # Total statistics.
-                combined_stats['total/duration'] = duration
-                combined_stats['total/successes'] = successes
-                combined_stats['total/steps'] = total_steps
-                combined_stats['total/steps_per_second'] = float(total_steps) / float(duration)
+            # Evaluation statistics.
+            if eval_env is not None:
+                combined_stats['eval/return'] = mpi_mean(eval_episode_rewards)
+                combined_stats['eval/return_history'] = mpi_mean(np.mean(eval_episode_rewards_history))
+                combined_stats['eval/Q'] = mpi_mean(eval_qs)
+                combined_stats['eval/episodes'] = mpi_mean(len(eval_episode_rewards))
 
-                for key in sorted(combined_stats.keys()):
-                    logger.record_tabular(key, combined_stats[key])
-                logger.dump_tabular()
-                logger.info('')
-                logdir = logger.get_dir()
-                # if rank == 0 and logdir:
-                if logdir:
-                    if hasattr(env, 'get_state'):
-                        with open(os.path.join(logdir, 'env_state.pkl'), 'wb') as f:
-                            pickle.dump(env.get_state(), f)
-                    if eval_env and hasattr(eval_env, 'get_state'):
-                        with open(os.path.join(logdir, 'eval_env_state.pkl'), 'wb') as f:
-                            pickle.dump(eval_env.get_state(), f)
+            # Total statistics.
+            combined_stats['total/duration'] = mpi_mean(duration)
+            combined_stats['total/steps_per_second'] = mpi_mean(float(t) / float(duration))
+            combined_stats['total/episodes'] = mpi_mean(episodes)
+            combined_stats['total/epochs'] = epoch + 1
+            combined_stats['total/steps'] = t
+
+            for key in sorted(combined_stats.keys()):
+                logger.record_tabular(key, combined_stats[key])
+            logger.dump_tabular()
+            logger.info('')
+            logdir = logger.get_dir()
+            if rank == 0 and logdir:
+                if hasattr(env, 'get_state'):
+                    with open(os.path.join(logdir, 'env_state.pkl'), 'wb') as f:
+                        pickle.dump(env.get_state(), f)
+                if eval_env and hasattr(eval_env, 'get_state'):
+                    with open(os.path.join(logdir, 'eval_env_state.pkl'), 'wb') as f:
+                        pickle.dump(eval_env.get_state(), f)
