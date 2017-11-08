@@ -72,7 +72,7 @@ class Monitor(Wrapper):
         ob, rew, done, info = self.env.step(action)
         self.rewards.append(rew)
         if done:
-            #self.needs_reset = True
+            self.needs_reset = True
             eprew = sum(self.rewards)
             eplen = len(self.rewards)
             epinfo = {"r": eprew, "l": eplen, "t": round(time.time() - self.tstart, 6)}
