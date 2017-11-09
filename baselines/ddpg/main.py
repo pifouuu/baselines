@@ -17,15 +17,15 @@ import gym
 import tensorflow as tf
 from mpi4py import MPI
 
-def run(env_id, seed, noise_type, memory_type, env_wrapper_type, layer_norm, evaluation, **kwargs):
+def run(env_id, seed, noise_type, memory_type, env_wrapper_type, layer_norm, evaluation, log_dir, **kwargs):
     rank = MPI.COMM_WORLD.Get_rank()
     if rank != 0: logger.set_level(logger.DISABLED)
     # Create envs.
     env = gym.make(env_id)
     env = bench.Monitor(env, logger.get_dir() and os.path.join(logger.get_dir(), "%i.monitor.json"%rank))
     gym.logger.setLevel(logging.WARN)
-    name = 'test_Memory'
-    logger.configure(dir='/home/pierre/PycharmProjects/baselines/baselines/ddpg/log/'+name,
+    dir = log_dir+'test_Memory'
+    logger.configure(dir=dir,
                      format_strs=['stdout', 'json', 'tensorboard'])
 
     if evaluation and rank==0:
@@ -124,8 +124,9 @@ def parse_args():
     parser.add_argument('--nb-rollout-steps', type=int, default=1000)  # per epoch cycle and MPI worker
     parser.add_argument('--noise-type', type=str, default='ou_0.4')  # choices are adaptive-param_xx, ou_xx, normal_xx, none
     parser.add_argument('--memory-type', type=str, default='standard') # choices are standard, her, no_reward
-    parser.add_argument('--env-wrapper-type', type=str, default='standard') # choices are standard and goal
+    parser.add_argument('--env-wrapper-type', type=str, default='goal') # choices are standard and goal
     boolean_flag(parser, 'evaluation', default=False)
+    parser.add_argument('--log-dir', type=str, default='/home/pierre/PycharmProjects/baselines/baselines/ddpg/log/')
     return vars(parser.parse_args())
 
 
