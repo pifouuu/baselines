@@ -72,9 +72,6 @@ def run(env_id, seed, noise_type, memory_type, env_wrapper_type, layer_norm, eva
     else:
         raise RuntimeError('unknown memory type "{}"'.format(memory_type))
 
-    ## FOR TESTING
-    memory = Memory(limit=int(1e6), action_shape=env.action_space.shape, observation_shape=env.observation_space.shape)
-
     # Critic and actor
     critic = Critic(layer_norm=layer_norm)
     actor = Actor(nb_actions, layer_norm=layer_norm)

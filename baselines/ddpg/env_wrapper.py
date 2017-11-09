@@ -35,6 +35,8 @@ class ContinuousMCWrapper(object):
         # Specific to continuous mountain car
         self.state_shape = (2,)
         self.action_shape = (1,)
+        self.reward_shape = (1,)
+        self.terminal_shape = (1,)
         self.obs_to_goal = [0]
 
     def process_observation(self, observation, state):

@@ -133,6 +133,7 @@ class StandardMemory(BaseMemory):
 
 class NoRewardMemory(BaseMemory):
     def __init__(self, env_wrapper, limit):
+        self.env_wrapper = env_wrapper
         BaseMemory.__init__(self, limit,
                             {'state0': env_wrapper.state_shape,
                              'action': env_wrapper.action_shape,
@@ -153,14 +154,9 @@ class NoRewardMemory(BaseMemory):
         return array_min2d(rewards), array_min2d(terminals)
 
     def sample(self, batch_size):
-        batch_idxs = np.random.random_integers(self.nb_entries - 2, size=batch_size)
-        result = {}
-        for name, value in self.buffer.contents:
-            result[name] = array_min2d(value.get_batch(batch_idxs))
-
-        result['rewards'], result['terminals1'] = self.compute_reward(result['state0'],
-                                                            result['action'],
-                                                            result['state1'])
+        result = super.sample(batch_size)
+        result['rewards'], result['terminals1'] = self.env_wrapper.evaluate_transition(result['state0'],
+                                                            result['action'], result['state1'])
         return result
 
 
@@ -170,10 +166,11 @@ class HerMemory(StandardMemory):
         obs_to_goal is a function that converts observations to goals
         goal_slice is a slice of indices of goal in observation
         """
-        StandardMemory.__init__(self, limit, env_wrapper)
+        StandardMemory.__init__(self, env_wrapper, limit)
 
         self.strategy = strategy
         self.data = [] # stores current episode
+        self.env_wrapper = env_wrapper
 
     def flush(self):
         """Dump the current data into the replay buffer with (final) HER"""
