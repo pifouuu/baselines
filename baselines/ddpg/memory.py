@@ -1,5 +1,4 @@
 import numpy as np
-import math
 
 class RingBuffer(object):
     def __init__(self, maxlen, shape, dtype='float32'):
@@ -96,8 +95,6 @@ class BaseMemory(object):
     def __init__(self, limit, content_shape):
         self.limit = limit
         self.buffer = ReplayBuffer(limit, content_shape)
-        self.observation_shape = content_shape['state0']
-        self.action_shape = content_shape['action']
 
     def sample(self, batch_size):
         # Draw such that we always have a proceeding element.
@@ -123,89 +120,23 @@ class BaseMemory(object):
     def nb_entries(self):
         return len(self.buffer.contents['state0'])
 
-class GoalContinuousMCWrapper(object):
-    def __init__(self):
-        # Specific to continuous mountain car
-        self.obs_to_goal = [0]
-        self.state_to_obs = [0,1]
-        self.state_to_goal = [2]
-        self.state_shape = (3,)
-        self.action_shape = (1,)
-        self.eps = 0.2
-
-    def process_state(self, observation, goal):
-        return np.concatenate([observation,goal])
-
-    def evaluate_transition(self, state0, action, state1):
-        r = 0
-        term = False
-        if np.abs(state1[self.state_to_obs][self.obs_to_goal] - state1[self.state_to_goal]) < self.eps:
-            r += 100
-            term = True
-        r -= math.pow(action[0], 2) * 0.1
-        return r, term
-
-    def evaluate_goal(self, state):
-        return np.abs(state[self.state_to_obs][self.obs_to_goal] -
-                      state[self.state_to_goal]) > self.eps
-
-    def sample_goal(self):
-        g = np.random.uniform([-1.2], [0.6], (1,))
-        #g = np.array([0.45])
-        return g
-
-
-class ContinuousMCWrapper(object):
-    def __init__(self):
-        # Specific to continuous mountain car
-        self.state_shape = (2,)
-        self.action_shape = (1,)
-        self.obs_to_goal = [0]
-
-    def process_state(self, observation, goal):
-        return observation
-
-    def evaluate_transition(self, state0, action, state1):
-        r = 0
-        term = False
-        if state1[self.obs_to_goal] >= 0.45:
-            r += 100
-            term = True
-        r -= math.pow(action[0], 2) * 0.1
-        return r, term
-
-    def evaluate_goal(self, state):
-        return True
-
-    def sample_goal(self):
-        # g = np.random.uniform([-1.2], [0.6], (1,))
-        g = [0.45]
-        return g
 
 class StandardMemory(BaseMemory):
     def __init__(self, env_wrapper, limit):
-        self.env_wrapper = env_wrapper
-        self.state_shape = self.env_wrapper.state_shape
-        self.action_shape = self.env_wrapper.action_shape
         BaseMemory.__init__(self, limit,
-                        {'state0': self.state_shape,
-                         'action': self.action_shape,
-                         'state1':self.state_shape,
-                         'reward':(1,),
-                         'terminal1':(1,)})
+                        {'state0': env_wrapper.state_shape,
+                         'action': env_wrapper.action_shape,
+                         'state1': env_wrapper.state_shape,
+                         'reward': env_wrapper.reward_shape,
+                         'terminal1':env_wrapper.terminal_shape})
 
 
 class NoRewardMemory(BaseMemory):
     def __init__(self, env_wrapper, limit):
-        # Specific to mountain car continuous
-        self.env_wrapper = env_wrapper
-        self.state_shape = self.env_wrapper.state_shape
-        self.action_shape = self.env_wrapper.action_shape
-
         BaseMemory.__init__(self, limit,
-                        {'state0': self.state_shape,
-                         'action': self.action_shape,
-                         'state1':self.state_shape})
+                            {'state0': env_wrapper.state_shape,
+                             'action': env_wrapper.action_shape,
+                             'state1': env_wrapper.state_shape})
 
 
 

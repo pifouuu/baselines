@@ -9,8 +9,8 @@ from baselines.common.misc_util import (
 )
 import baselines.ddpg.training as training
 from baselines.ddpg.models import Actor, Critic
-from baselines.ddpg.memory import BaseMemory, Memory, HerMemory, GoalContinuousMCWrapper,\
-    ContinuousMCWrapper, NoRewardMemory, StandardMemory
+from baselines.ddpg.env_wrapper import GoalContinuousMCWrapper, ContinuousMCWrapper
+from baselines.ddpg.memory import BaseMemory, Memory, HerMemory, NoRewardMemory, StandardMemory
 from baselines.ddpg.noise import *
 
 import gym
@@ -91,7 +91,7 @@ def run(env_id, seed, noise_type, memory_type, env_wrapper_type, layer_norm, eva
     # Disable logging for rank != 0 to avoid noise.
     if rank == 0:
         start_time = time.time()
-    training.train(env=env, eval_env=eval_env, param_noise=param_noise,
+    training.train(env=env, env_wrapper=env_wrapper, eval_env=eval_env, param_noise=param_noise,
         action_noise=action_noise, actor=actor, critic=critic, memory=memory, **kwargs)
 
     # Shutting environments
@@ -111,7 +111,7 @@ def parse_args():
     boolean_flag(parser, 'render', default=False)
     boolean_flag(parser, 'normalize-returns', default=False)
     boolean_flag(parser, 'normalize-observations', default=True)
-    parser.add_argument('--seed', help='RNG seed', type=int, default=456)
+    parser.add_argument('--seed', help='RNG seed', type=int, default=25)
     parser.add_argument('--critic-l2-reg', type=float, default=1e-2)
     parser.add_argument('--batch-size', type=int, default=64)  # per MPI worker
     parser.add_argument('--actor-lr', type=float, default=1e-4)
@@ -125,7 +125,7 @@ def parse_args():
     parser.add_argument('--nb-train-steps', type=int, default=50)  # per epoch cycle and MPI worker
     parser.add_argument('--nb-eval-steps', type=int, default=1000)  # per epoch cycle and MPI worker
     parser.add_argument('--nb-rollout-steps', type=int, default=1000)  # per epoch cycle and MPI worker
-    parser.add_argument('--noise-type', type=str, default='ou_0.5')  # choices are adaptive-param_xx, ou_xx, normal_xx, none
+    parser.add_argument('--noise-type', type=str, default='ou_0.4')  # choices are adaptive-param_xx, ou_xx, normal_xx, none
     parser.add_argument('--memory-type', type=str, default='standard') # choices are standard, her, no_reward
     parser.add_argument('--env-wrapper-type', type=str, default='standard') # choices are standard and goal
     boolean_flag(parser, 'evaluation', default=False)

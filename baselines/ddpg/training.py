@@ -13,8 +13,7 @@ import tensorflow as tf
 from mpi4py import MPI
 
 
-def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, param_noise, actor, critic,
-    normalize_returns, normalize_observations, critic_l2_reg, actor_lr, critic_lr, action_noise,
+def train(env, env_wrapper, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, param_noise, actor, critic, normalize_returns, normalize_observations, critic_l2_reg, actor_lr, critic_lr, action_noise,
     popart, gamma, clip_norm, nb_train_steps, nb_rollout_steps, nb_eval_steps, batch_size, memory,
     tau=0.01, eval_env=None, param_noise_adaption_interval=50):
     rank = MPI.COMM_WORLD.Get_rank()
@@ -68,89 +67,33 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
         epoch_episodes = 0
         for epoch in range(nb_epochs):
             for cycle in range(nb_epoch_cycles):
+
                 # Selects a goal for the current episode
-                # goal_found = False
-                # while not goal_found:
-                #     goal_episode = agent.memory.env_wrapper.sample_goal()
-                #     state_init = agent.memory.env_wrapper.process_state(obs, goal_episode)
-                #     goal_found = agent.memory.env_wrapper.evaluate_goal(state_init)
-
-                for t_rollout in range(nb_rollout_steps):
-                    # Predict next action.
-                    action, q = agent.pi(obs, apply_noise=True, compute_Q=True)
-                    assert action.shape == env.action_space.shape
-
-                    # Execute next action.
-                    if rank == 0 and render:
-                        env.render()
-                    assert max_action.shape == action.shape
-                    new_obs, r, done, info = env.step(max_action * action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
-                    t += 1
-                    if rank == 0 and render:
-                        env.render()
-                    episode_reward += r
-                    episode_step += 1
-
-                    # Book-keeping.
-                    epoch_actions.append(action)
-                    epoch_qs.append(q)
-                    agent.store_transition(obs, action, r, new_obs, done)
-                    obs = new_obs
-
-                    if done:
-                        # Episode done.
-                        epoch_episode_rewards.append(episode_reward)
-                        episode_rewards_history.append(episode_reward)
-                        epoch_episode_steps.append(episode_step)
-                        episode_reward = 0.
-                        episode_step = 0
-                        epoch_episodes += 1
-                        episodes += 1
-
-                        agent.reset()
-                        obs = env.reset()
+                goal_episode = env_wrapper.sample_goal(obs)
 
                 # for t_rollout in range(nb_rollout_steps):
-                #     # Compute state from observation and internal observation (goal)
-                #     state0 = agent.memory.env_wrapper.process_state(obs, goal_episode)
-                #
                 #     # Predict next action.
-                #     action, q = agent.pi(state0, apply_noise=True, compute_Q=True)
+                #     action, q = agent.pi(obs, apply_noise=True, compute_Q=True)
                 #     assert action.shape == env.action_space.shape
                 #
                 #     # Execute next action.
                 #     if rank == 0 and render:
                 #         env.render()
                 #     assert max_action.shape == action.shape
-                #     new_obs, _, done_env, info = env.step(max_action * action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
+                #     new_obs, r, done, info = env.step(max_action * action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
                 #     t += 1
                 #     if rank == 0 and render:
                 #         env.render()
-                #     episode_step += 1
-                #
-                #     # Compute next state from next observation and internal observation (goal)
-                #     state1 = agent.memory.env_wrapper.process_state(new_obs, goal_episode)
-                #
-                #     # Compute reward and terminal condition from environment wrapper instead of from environment
-                #     r, done = agent.memory.env_wrapper.evaluate_transition(state0, action, state1)
-                #
                 #     episode_reward += r
+                #     episode_step += 1
                 #
                 #     # Book-keeping.
                 #     epoch_actions.append(action)
                 #     epoch_qs.append(q)
-                #
-                #     # Add to experience replay : TODO make it automatic from memory
-                #     buffer_item = {'state0': state0,
-                #                    'action': action,
-                #                    'reward': r,
-                #                    'state1': state1,
-                #                    'terminal1': done}
-                #     agent.store_transition(buffer_item)
-                #
+                #     agent.store_transition(obs, action, r, new_obs, done)
                 #     obs = new_obs
                 #
-                #     if done or env.needs_reset:
+                #     if done:
                 #         # Episode done.
                 #         epoch_episode_rewards.append(episode_reward)
                 #         episode_rewards_history.append(episode_reward)
@@ -159,8 +102,50 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                 #         episode_step = 0
                 #         epoch_episodes += 1
                 #         episodes += 1
+                #
                 #         agent.reset()
                 #         obs = env.reset()
+
+                for t_rollout in range(nb_rollout_steps):
+                    # Compute state from observation and internal observation (goal)
+                    state0 = env_wrapper.process_observation(obs, goal_episode)
+
+                    # Predict next action.
+                    action, q = agent.pi(state0, apply_noise=True, compute_Q=True)
+                    assert action.shape == env.action_space.shape
+
+                    # Execute next action.
+                    if rank == 0 and render:
+                        env.render()
+                    assert max_action.shape == action.shape
+                    new_obs, r_env, done_env, info = env.step(max_action * action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
+                    t += 1
+                    if rank == 0 and render:
+                        env.render()
+                    episode_step += 1
+
+                    buffer_item = env_wrapper.process_step(state0, action, new_obs, r_env, done_env, info)
+                    agent.memory.append(buffer_item)
+
+                    episode_reward += buffer_item['reward']
+
+                    # Book-keeping.
+                    epoch_actions.append(action)
+                    epoch_qs.append(q)
+
+                    obs = new_obs
+
+                    if done or env.needs_reset:
+                        # Episode done.
+                        epoch_episode_rewards.append(episode_reward)
+                        episode_rewards_history.append(episode_reward)
+                        epoch_episode_steps.append(episode_step)
+                        episode_reward = 0.
+                        episode_step = 0
+                        epoch_episodes += 1
+                        episodes += 1
+                        agent.reset()
+                        obs = env.reset()
 
                 # Train.
                 epoch_actor_losses = []
