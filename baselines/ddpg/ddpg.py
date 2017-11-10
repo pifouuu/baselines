@@ -318,6 +318,9 @@ class DDPG(object):
             self.critic_target: target_Q,
         })
 
+        self.actor_optimizer.update(actor_grads, stepsize=self.actor_lr)
+        self.critic_optimizer.update(critic_grads, stepsize=self.critic_lr)
+
         return critic_loss, actor_loss
 
     def initialize(self, sess):
